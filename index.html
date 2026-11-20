@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>행정용어 순화 및 공공언어 교정기 v3</title>
+<!-- Tailwind CSS 로드 -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- 엑셀(.xlsx) 파싱 및 내보내기용 SheetJS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- HWPX/DOCX 압축 해제(XML 텍스트 추출)용 JSZip -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    font-family: 'Pretendard', 'Inter', 'Malgun Gothic', '맑은 고딕', sans-serif;
+    background-color: #F4F6F9;
+    color: #1E293B;
+  }
+  /* 순화된 단어 토큰 스타일 */
+  .token-purified {
+    background-color: #FEF08A;
+    border-bottom: 2px solid #EAB308;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-weight: 600;
+    color: #1E293B;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .token-purified:hover {
+    background-color: #FDE047;
+  }
+  /* 원문 유지 단어 토큰 스타일 */
+  .token-kept {
+    background-color: #E2E8F0;
+    border-bottom: 2px dashed #94A3B8;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-weight: 500;
+    color: #334155;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .token-kept:hover {
+    background-color: #CBD5E1;
+  }
+  /* 법령·괄호 보호 단어 토큰 스타일 */
+  .token-protected {
+    background-color: #DBEAFE;
+    border-bottom: 2px dotted #3B82F6;
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: #1E40AF;
+    cursor: pointer;
+  }
+  .orig-hint {
+    font-size: 0.76rem;
+    color: #854D0E;
+    font-weight: 500;
+    user-select: none;
+  }
+  .result-box {
+    min-height: 330px;
+    line-height: 1.95;
+    white-space: pre-wrap;
+    word-break: keep-all;
+    outline: none;
+  }
+  .result-box:focus {
+    background-color: #FEFEFC;
+    box-shadow: inset 0 0 0 2px #93C5FD;
+  }
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #FFFFFF; }
+  }
+</style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+<!-- 상단 헤더 -->
+<header class="bg-gradient-to-r from-[#1E3A5F] to-[#142842] text-white shadow-md no-print">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap justify-between items-center gap-3">
+    <div>
+      <div class="flex items-center gap-2">
+        <span class="bg-blue-500/30 border border-blue-300/40 text-xs font-bold px-2.5 py-0.5 rounded-full">v3 실무 확장판</span>
+        <h1 class="text-lg sm:text-xl font-bold tracking-tight">행정용어 순화 및 공공언어 교정기</h1>
+      </div>
+      <p class="text-xs sm:text-sm text-slate-300 mt-1">보도자료·공고문 문서 연동, 법령·고유명사 보호 필터, 문체 교정 및 신·구조문 비교 리포트 지원</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <span id="dictCountBadge" class="bg-white/15 border border-white/25 px-3 py-1.5 rounded-lg text-xs font-semibold">순화 사전: 874개</span>
+      <span id="matchCountBadge" class="bg-amber-400/20 border border-amber-300/40 text-amber-100 px-3 py-1.5 rounded-lg text-xs font-semibold">검출 0건 · 순화 0건</span>
+    </div>
+  </div>
+</header>
+
+<!-- 메인 컨테이너 -->
+<main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 flex-1 space-y-5">
+
+  <!-- 상단 기능 도구모음 -->
+  <section class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-wrap justify-between items-center gap-3 no-print">
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- 문서 파일 업로드 -->
+      <label class="cursor-pointer inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-lg transition">
+        <span>📂 문서 불러오기 (HWPX/DOCX/TXT)</span>
+        <input type="file" id="docFileInput" accept=".txt,.hwpx,.docx" class="hidden" onchange="handleDocUpload(event)">
+      </label>
+
+      <!-- 엑셀 사전 업로드 -->
+      <label class="cursor-pointer inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-lg transition" title="행정용어_순화어_목록.xlsx 파일을 불러와 사전을 갱신합니다">
+        <span>📊 엑셀 사전 연동 (.xlsx)</span>
+        <input type="file" id="dictFileInput" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleDictUpload(event)">
+      </label>
+
+      <button onclick="loadSample()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg transition">
+        샘플 보도자료
+      </button>
+      <button onclick="clearAll()" class="bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg transition">
+        초기화
+      </button>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <button onclick="openDictModal()" class="bg-blue-50 hover:bg-blue-100 text-[#1E3A5F] border border-blue-200 text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg transition">
+        📖 사전 조회 · 사용자 단어/예외어 관리
+      </button>
+      <button onclick="exportComparisonExcel()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-lg transition shadow-sm">
+        📥 검토 비교표 엑셀 저장
+      </button>
+    </div>
+  </section>
+
+  <!-- 보호 필터 및 옵션 설정 바 -->
+  <section class="bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm no-print">
+    <div class="flex flex-wrap items-center gap-4">
+      <span class="font-bold text-[#1E3A5F] flex items-center gap-1">🛡️ 오탐 방지 보호 필터:</span>
+      <label class="inline-flex items-center gap-1.5 cursor-pointer select-none">
+        <input type="checkbox" id="protectQuotes" checked onchange="analyzeText()" class="rounded text-blue-600 focus:ring-blue-500">
+        <span>법령·사업명 괄호 보호 (<code class="bg-slate-100 px-1 rounded">「 」</code>, <code class="bg-slate-100 px-1 rounded">『 』</code>, <code class="bg-slate-100 px-1 rounded">' '</code>, <code class="bg-slate-100 px-1 rounded">" "</code>)</span>
+      </label>
+      <label class="inline-flex items-center gap-1.5 cursor-pointer select-none">
+        <input type="checkbox" id="protectLawTerms" checked onchange="analyzeText()" class="rounded text-blue-600 focus:ring-blue-500">
+        <span>법령 조항명 보호 (~법, ~조례, ~규칙 앞 용어)</span>
+      </label>
+      <label class="inline-flex items-center gap-1.5 cursor-pointer select-none">
+        <input type="checkbox" id="checkStyleIssues" checked onchange="analyzeText()" class="rounded text-blue-600 focus:ring-blue-500">
+        <span>일본어투·중복피동·장문 문체 진단</span>
+      </label>
+    </div>
+    <div id="loadedFileName" class="text-xs text-slate-500 font-medium"></div>
+  </section>
+
+  <!-- 메인 작업 영역 (좌: 원문 입력 / 우: 순화 결과 및 직접 편집) -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-5 no-print">
+    <!-- 좌측: 원문 입력 -->
+    <div class="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+      <div class="bg-[#EAF0F6] border-b border-slate-200 px-4 py-3 flex justify-between items-center">
+        <h2 class="text-sm sm:text-base font-bold text-[#1E3A5F]">1. 원문 입력 (보도자료·공고문 초안)</h2>
+        <span id="charCounter" class="text-xs text-slate-600 font-semibold">공백 포함: 0자 / 제외: 0자</span>
+      </div>
+      <textarea id="sourceText" class="w-full flex-1 min-h-[340px] p-4 text-sm sm:text-base leading-relaxed resize-y outline-none text-slate-800" placeholder="이곳에 보도자료나 공고문 초안을 붙여넣거나 상단 [문서 불러오기]를 이용해 파일을 불러오세요." oninput="updateCharCount()"></textarea>
+      <div class="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-wrap justify-between items-center gap-2">
+        <span class="text-xs text-slate-500">* 복합어 우선 매칭 · 받침 판별 조사 자동 보정 적용</span>
+        <button onclick="analyzeText()" class="bg-[#1E3A5F] hover:bg-[#142842] text-white text-sm font-bold px-4 py-2 rounded-lg transition shadow-sm">
+          행정용어 순화 검사하기 ▶
+        </button>
+      </div>
+    </div>
+
+    <!-- 우측: 순화 결과 및 직접 편집창 -->
+    <div class="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+      <div class="bg-[#EAF0F6] border-b border-slate-200 px-4 py-3 flex flex-wrap justify-between items-center gap-2">
+        <h2 class="text-sm sm:text-base font-bold text-[#1E3A5F]">2. 순화 결과 및 직접 편집창</h2>
+        <div class="flex items-center gap-2">
+          <span id="resultCharCounter" class="text-xs text-slate-600 font-semibold">0자</span>
+          <button onclick="downloadTxtResult()" class="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition">
+            TXT 저장
+          </button>
+          <button onclick="copyCleanText()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-sm">
+            순화 결과 전체 복사
+          </button>
+        </div>
+      </div>
+
+      <!-- 핵심 키워드 바 -->
+      <div id="keywordBar" class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center gap-1.5 min-h-[42px]">
+        <span class="text-xs font-bold text-[#1E3A5F] mr-1">핵심 키워드 TOP 5:</span>
+        <span class="text-xs text-slate-400">검사 실행 시 자동 추출됩니다.</span>
+      </div>
+
+      <!-- 안내 바 -->
+      <div class="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2 text-xs flex flex-wrap justify-between items-center gap-2">
+        <span>💡 <strong>노란색(순화)·회색(유지)·파란색(보호) 단어 클릭</strong> 시 상태 전환 · 본문 직접 클릭 후 자유 수정 가능</span>
+        <span id="manualEditBadge" class="hidden bg-amber-200 border border-amber-400 px-2 py-0.5 rounded font-bold text-amber-950">직접 편집됨</span>
+      </div>
+
+      <!-- 결과 편집 박스 -->
+      <div id="resultDisplay" class="result-box p-4 text-sm sm:text-base flex-1 overflow-y-auto" contenteditable="true" spellcheck="false" oninput="onManualEdit()">
+        <span class="text-slate-400 text-sm" contenteditable="false">좌측에 문장을 입력하고 [행정용어 순화 검사하기]를 누르면 순화된 문장이 표시됩니다.</span>
+      </div>
+
+      <div class="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-wrap justify-between items-center gap-2">
+        <label class="text-xs cursor-pointer inline-flex items-center gap-1.5 select-none">
+          <input type="checkbox" id="showOrigToggle" checked onchange="renderOutput()" class="rounded text-blue-600">
+          <span>원문 병기 <code class="bg-slate-200 px-1 rounded">(←원문)</code> 표시 <span class="text-slate-500">(복사·저장 시 자동 제외)</span></span>
+        </label>
+        <button onclick="renderOutput()" class="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold px-2.5 py-1 rounded-md transition">
+          설정 기준으로 다시 그리기
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 공공언어 문체 및 표현 개선 제안 영역 -->
+  <section id="styleAdviceSection" class="hidden bg-white border border-indigo-200 rounded-xl overflow-hidden shadow-sm no-print">
+    <div class="bg-indigo-50 border-b border-indigo-200 px-4 py-3 flex justify-between items-center">
+      <div>
+        <h3 class="text-sm sm:text-base font-bold text-indigo-950">✨ 공공언어 문체·일본어투·장문 진단 리포트</h3>
+        <p class="text-xs text-indigo-700">단순 용어 순화 외에 공고문·보도자료의 가독성을 떨어뜨리는 번역투, 중복 피동, 과도한 장문을 점검했습니다.</p>
+      </div>
+      <span id="styleIssueBadge" class="bg-indigo-600 text-white text-xs font-bold px-2.5 py-1 rounded-full">0건 감지</span>
+    </div>
+    <div id="styleAdviceList" class="p-4 divide-y divide-slate-100 text-sm"></div>
+  </section>
+
+  <!-- 하단: 검출 용어별 선택 및 순화어 고르기 표 -->
+  <section class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+    <div class="bg-[#EAF0F6] border-b border-slate-200 px-4 py-3 flex flex-wrap justify-between items-center gap-2">
+      <div>
+        <h3 class="text-sm sm:text-base font-bold text-[#1E3A5F]">3. 검출 용어별 순화 적용 여부 및 대체어 선택 (신·구조문 대비표)</h3>
+        <p class="text-xs text-slate-600">문맥에 맞는 순화어를 선택하거나 예외 용어로 등록하여 다음 검사부터 자동 제외할 수 있습니다.</p>
+      </div>
+      <div class="flex flex-wrap gap-1.5 no-print">
+        <button onclick="toggleAllMatches(true)" class="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg">전체 순화 적용</button>
+        <button onclick="toggleAllMatches(false)" class="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg">전체 원문 유지</button>
+        <button onclick="window.print()" class="bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">🖨️ 인쇄 / PDF</button>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse text-xs sm:text-sm">
+        <thead>
+          <tr class="bg-slate-50 text-[#1E3A5F] border-b border-slate-200">
+            <th class="py-2.5 px-3 w-24">상태/적용</th>
+            <th class="py-2.5 px-3 w-36">원문 용어</th>
+            <th class="py-2.5 px-3 w-56">순화어 선택 (후보 목록)</th>
+            <th class="py-2.5 px-3 w-44">직접 수정 입력</th>
+            <th class="py-2.5 px-3">문맥 미리보기 (조사 자동 반영)</th>
+            <th class="py-2.5 px-3 w-28 text-center no-print">예외 관리</th>
+          </tr>
+        </thead>
+        <tbody id="summaryTableBody" class="divide-y divide-slate-100">
+          <tr>
+            <td colspan="6" class="text-center text-slate-400 py-8">아직 검사된 내역이 없습니다.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<!-- 사전 조회 및 사용자 사전/예외어 관리 모달 -->
+<div id="dictModal" class="hidden fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" onclick="if(event.target===this) closeDictModal()">
+  <div class="bg-white rounded-xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+    <div class="bg-[#1E3A5F] text-white px-5 py-3.5 flex justify-between items-center">
+      <h3 class="text-base font-bold">행정용어 순화 사전 및 부서 예외어 관리</h3>
+      <button onclick="closeDictModal()" class="bg-white/15 hover:bg-white/25 px-3 py-1 rounded text-xs font-semibold">닫기 ✕</button>
+    </div>
+
+    <!-- 모달 탭 -->
+    <div class="flex border-b border-slate-200 bg-slate-50 px-5 pt-2 gap-2 text-sm font-semibold">
+      <button id="tabBtnDict" onclick="switchModalTab('dict')" class="px-4 py-2 rounded-t-lg bg-white border-t border-x border-slate-200 text-[#1E3A5F]">전체 순화 사전 조회</button>
+      <button id="tabBtnCustom" onclick="switchModalTab('custom')" class="px-4 py-2 rounded-t-lg text-slate-600 hover:text-slate-900">사용자 순화어 추가</button>
+      <button id="tabBtnIgnore" onclick="switchModalTab('ignore')" class="px-4 py-2 rounded-t-lg text-slate-600 hover:text-slate-900">순화 제외(예외) 용어</button>
+    </div>
+
+    <!-- 탭 1: 전체 사전 조회 -->
+    <div id="modalTabDict" class="p-5 overflow-y-auto flex-1 space-y-3">
+      <div class="flex gap-2">
+        <input type="text" id="modalSearchInput" class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="대상 용어 또는 순화어를 검색하세요..." oninput="renderDictTable()">
+        <button onclick="exportDictionaryExcel()" class="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-3.5 py-2 rounded-lg">현재 사전 엑셀 다운로드</button>
+      </div>
+      <div class="border border-slate-200 rounded-lg overflow-hidden">
+        <table class="w-full text-left text-xs sm:text-sm">
+          <thead class="bg-slate-50 text-[#1E3A5F] border-b border-slate-200">
+            <tr>
+              <th class="py-2 px-3 w-16">번호</th>
+              <th class="py-2 px-3 w-48">대상 용어</th>
+              <th class="py-2 px-3">순화어</th>
+              <th class="py-2 px-3 w-24">구분</th>
+            </tr>
+          </thead>
+          <tbody id="dictTableBody" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 탭 2: 사용자 순화어 추가 -->
+    <div id="modalTabCustom" class="hidden p-5 overflow-y-auto flex-1 space-y-4">
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-3.5 text-xs text-blue-900">
+        우리 부서에서 자주 쓰이는 전문용어나 신조어를 추가하면 브라우저에 자동 저장되어 이후 검사 시 함께 반영됩니다.
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <input type="text" id="newCustomTerm" class="border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="대상 용어 (예: 킥오프)">
+        <input type="text" id="newCustomPurified" class="border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="순화어 (쉼표 구분: 착수, 첫 모임)">
+        <button onclick="addCustomDictEntry()" class="bg-[#1E3A5F] hover:bg-[#142842] text-white text-sm font-bold px-4 py-2 rounded-lg">+ 사전에 추가</button>
+      </div>
+      <div id="customDictList" class="divide-y divide-slate-200 border border-slate-200 rounded-lg"></div>
+    </div>
+
+    <!-- 탭 3: 순화 제외(예외) 용어 관리 -->
+    <div id="modalTabIgnore" class="hidden p-5 overflow-y-auto flex-1 space-y-4">
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-900">
+        고유 사업명, 부서명, 법정 용어 등 순화하지 않고 원문 그대로 써야 하는 단어를 등록해 두면 검출에서 자동 제외됩니다.
+      </div>
+      <div class="flex gap-2">
+        <input type="text" id="newIgnoreTerm" class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="제외할 용어 입력 (예: 인프라, 스마트워크)">
+        <button onclick="addIgnoreWordFromInput()" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold px-4 py-2 rounded-lg">+ 예외어 등록</button>
+      </div>
+      <div id="ignoreWordsList" class="flex flex-wrap gap-2"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 알림 토스트 -->
+<div id="toast" class="fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-2.5 rounded-lg text-xs sm:text-sm font-semibold shadow-lg opacity-0 pointer-events-none transition-opacity duration-200 z-50"></div>
+
+<script>
+// ==========================================
+// 1. 기본 내장 서초구 행정용어 순화 사전 (874개)
+// ==========================================
+const BASE_DICTIONARY = [{"t": "가금류", "p": "사육 조류"}, {"t": "가내시", "p": "임시 통보"}, {"t": "가드레일", "p": "보호난간"}, {"t": "가매장", "p": "임시 매장"}, {"t": "가솔린", "p": "휘발유"}, {"t": "가수용", "p": "임시 수용"}, {"t": "가위탁", "p": "임시 위탁"}, {"t": "가일층", "p": "한층 더, 좀 더"}, {"t": "가접수", "p": "임시 접수"}, {"t": "가제목", "p": "임시 제목"}, {"t": "가지정", "p": "임시 지정"}, {"t": "가치장", "p": "임시 보관소"}, {"t": "간석지", "p": "개펄"}, {"t": "간수", "p": "교도관"}, {"t": "감옥", "p": "교도소"}, {"t": "객담", "p": "가래"}, {"t": "갤러리", "p": "화랑"}, {"t": "갱의실/경의실", "p": "탈의실, 옷 갈아입는 곳"}, {"t": "거마비", "p": "① 교통비, ② 사례비"}, {"t": "거소", "p": "사는 곳"}, {"t": "검체", "p": "검사 대상물"}, {"t": "견사", "p": "고치실"}, {"t": "견출지", "p": "찾음표, 찾아보기표"}, {"t": "경구투여", "p": "복용, 약 먹음, 복약"}, {"t": "계육", "p": "닭고기"}, {"t": "계출", "p": "신고"}, {"t": "계출서", "p": "신고서"}, {"t": "고가차", "p": "사다리차"}, {"t": "고지 방송", "p": "안내 방송, 알림 방송"}, {"t": "고참", "p": "선임자"}, {"t": "공란", "p": "빈칸"}, {"t": "공병", "p": "빈 병"}, {"t": "공사다망 중", "p": "바쁘신 가운데, 바쁘신 데도"}, {"t": "공상", "p": "공무 중 부상"}, {"t": "과년도", "p": "지난해"}, {"t": "구랍", "p": "지난해 섣달"}, {"t": "구릉", "p": "언덕"}, {"t": "균사", "p": "곰팡이실, 팡이실"}, {"t": "근일", "p": "요사이, 요즘, 가까운 날"}, {"t": "글로벌", "p": "지구촌, 국제적, 세계적, 국제, 세계"}, {"t": "금년", "p": "올해"}, {"t": "금번", "p": "이번"}, {"t": "금월", "p": "이달, 이번 달"}, {"t": "급부금", "p": "지급금, 내줄 돈"}, {"t": "끽연", "p": "흡연"}, {"t": "낙뢰", "p": "벼락"}, {"t": "내구연한", "p": "사용 가능 햇수, 견딜 햇수"}, {"t": "넘버", "p": "① 번호, 호수, 호, ② 수, 숫자"}, {"t": "노견", "p": "갓길"}, {"t": "노이로제", "p": "신경쇠약"}, {"t": "노후/노후한", "p": "낡은"}, {"t": "누일", "p": "여러 날"}, {"t": "다년생", "p": "여러해살이"}, {"t": "담수어", "p": "민물고기"}, {"t": "데커레이션", "p": "장식, 꾸밈"}, {"t": "도선장", "p": "나루터"}, {"t": "독거실", "p": "독방"}, {"t": "독립가옥", "p": "외딴집, 딴채 살림집"}, {"t": "돈육", "p": "돼지고기"}, {"t": "동력거", "p": "기계톱, 동력톱"}, {"t": "동선", "p": "구리선"}, {"t": "동소", "p": "같은 곳"}, {"t": "두창", "p": "천연두, 마마"}, {"t": "드라마틱하다", "p": "극적이다"}, {"t": "디텍터", "p": "① 탐지기, ② 검출기, ③ 검파기, ④ 검전기"}, {"t": "라스트", "p": "마지막, 최종"}, {"t": "라이벌", "p": "맞수, 경쟁자"}, {"t": "라이프사이클", "p": "① 생애 주기, ② 수명 주기"}, {"t": "라이프스타일", "p": "생활양식"}, {"t": "래치", "p": "걸쇠, 잠금쇠"}, {"t": "랜덤 샘플링", "p": "임의 표본"}, {"t": "러닝타임", "p": "상영시간"}, {"t": "레시피", "p": "조리법"}, {"t": "레이스", "p": "경주, 달리기"}, {"t": "레인코트", "p": "비옷"}, {"t": "레지던시", "p": "거주, 거주지"}, {"t": "레크리에이션", "p": "오락, 놀이"}, {"t": "렉처", "p": "강연, 강의"}, {"t": "로열박스", "p": "귀빈석"}, {"t": "로열티", "p": "사용료, 저작권료"}, {"t": "로터리식", "p": "회전형, 회전식"}, {"t": "로프", "p": "밧줄, 줄"}, {"t": "루베", "p": "세제곱미터, m3"}, {"t": "룰", "p": "규칙"}, {"t": "리더", "p": "지도자"}, {"t": "리모델링", "p": "새단장, 구조 변경"}, {"t": "리사이클링", "p": "재활용"}, {"t": "리셉션", "p": "연회, 피로연, 축하연, 초대연, 맞이 잔치"}, {"t": "리스크", "p": "위험"}, {"t": "리플", "p": "댓글"}, {"t": "리플릿", "p": "광고지, 홍보지, 홍보 책자, 홍보 전단, 광고 쪽지, 홍보물"}, {"t": "마스터플랜", "p": "① 종합 계획, ② 기본 계획, ③ 기본 설계"}, {"t": "마켓셰어", "p": "시장 점유율"}, {"t": "매도인", "p": "파는 사람"}, {"t": "매수인", "p": "사는 사람"}, {"t": "매스미디어", "p": "대중매체"}, {"t": "맥주맥", "p": "맥주보리"}, {"t": "맨투맨", "p": "일대일"}, {"t": "머천다이징", "p": "상품화"}, {"t": "멀티탭", "p": "모둠꽂이, 모둠전원꽂이"}, {"t": "메세나", "p": "문예후원, 예술후원"}, {"t": "메커니즘", "p": "① 구조, 체제, 체계, ② 기제, 작용 원리"}, {"t": "메타포", "p": "은유"}, {"t": "면포", "p": "무명, 무명베"}, {"t": "명의 환서", "p": "이름 바꿔 적기"}, {"t": "모델케이스", "p": "본보기"}, {"t": "모럴", "p": "도덕"}, {"t": "모사 우표", "p": "위조 우표"}, {"t": "모션", "p": "동작, 움직임, 몸짓"}, {"t": "목각인", "p": "나무도장"}, {"t": "목근", "p": "나무뿌리"}, {"t": "목산", "p": "눈셈, 눈어림, 눈짐작, 눈대중"}, {"t": "목상자", "p": "나무상자"}, {"t": "목편", "p": "나뭇조각, 나이테 표본"}, {"t": "몽리", "p": "수혜, 덕 봄, 이익 얻음"}, {"t": "몽리자", "p": "수혜자"}, {"t": "뮤직아카데미", "p": "음악원, 음악 기관, 음악 단체, 음악 학원"}, {"t": "미강", "p": "쌀겨"}, {"t": "미니 차트", "p": "작은 도표, 작은 괘도"}, {"t": "미스테이크", "p": "잘못, 틀림, 실수"}, {"t": "미싱", "p": "재봉틀"}, {"t": "믹스하다", "p": "섞다"}, {"t": "바겐세일", "p": "할인 판매"}, {"t": "바리케이드", "p": "방어벽, 방어 울타리, 방책"}, {"t": "바운더리", "p": "① 경계, 구역, ② 담당 범위, ③ 경계선"}, {"t": "바이브레이터", "p": "진동기"}, {"t": "바이어", "p": "구매자, 수입상"}, {"t": "바캉스", "p": "휴가, 여름휴가"}, {"t": "발레파킹", "p": "대리주차"}, {"t": "발치", "p": "이뽑기"}, {"t": "방카쉬랑스", "p": "은행연계보험"}, {"t": "백 데이터", "p": "① 근거 자료, ② 참고 자료, ③ 보관 자료"}, {"t": "백그라운드", "p": "① 연줄, ② 배경, ③ 바탕"}, {"t": "밸런스", "p": "균형"}, {"t": "뱅크", "p": "은행"}, {"t": "버추얼", "p": "가상"}, {"t": "별송", "p": "따로 보냄"}, {"t": "별첨", "p": "따로 붙임"}, {"t": "보너스", "p": "상여금"}, {"t": "보디가드", "p": "경호원"}, {"t": "보정", "p": "바로잡음"}, {"t": "본건", "p": "이 사건, 이 일"}, {"t": "본드", "p": "접착제"}, {"t": "부불금", "p": "할부금"}, {"t": "부식토", "p": "거름흙"}, {"t": "분묘", "p": "무덤"}, {"t": "불원간", "p": "머지않아"}, {"t": "불입", "p": "납입, 납부, 냄, 치름"}, {"t": "불입 자본", "p": "납입 자본"}, {"t": "브로커", "p": "중개인, 거간"}, {"t": "브이아이피", "p": "귀빈, 요인"}, {"t": "블루벨트", "p": "청정 수역, 근해 보호 지역"}, {"t": "삐라", "p": "전단"}, {"t": "사고다발지역", "p": "사고잦은곳"}, {"t": "사력토", "p": "자갈흙"}, {"t": "사보타주", "p": "태업"}, {"t": "사시미", "p": "생선회"}, {"t": "사양토", "p": "모래참흙, 모래진흙"}, {"t": "살포", "p": "뿌리기"}, {"t": "삽목", "p": "꺾꽂이, 가지심기"}, {"t": "삽식", "p": "꺾꽂이"}, {"t": "상시", "p": "늘"}, {"t": "상신", "p": "올림, 보고"}, {"t": "생장추", "p": "나이테 측정기, 나이테 표본 채취기"}, {"t": "서머리", "p": "간추림, 요약, 개요"}, {"t": "서비스 차지", "p": "봉사료"}, {"t": "서클", "p": "동아리"}, {"t": "서훈된 자", "p": "훈장을 받은 자"}, {"t": "석력지", "p": "자갈땅"}, {"t": "선하차 후승차", "p": "내린 다음 타기"}, {"t": "센서", "p": "감지기"}, {"t": "센세이션", "p": "큰 화제, 선풍"}, {"t": "센티멘털리즘", "p": "감상주의"}, {"t": "소류지", "p": "늪지대, 늪지역"}, {"t": "소맥", "p": "밀"}, {"t": "소맥분", "p": "밀가루"}, {"t": "소스", "p": "출처, 자료, 원전"}, {"t": "소정 기일 내", "p": "정한 날짜 안(에)"}, {"t": "소정의", "p": "정해진"}, {"t": "소택지", "p": "늪, 늪지역, 습한 땅, 늪지대, 습지"}, {"t": "소트", "p": "정렬"}, {"t": "송달지", "p": "배달지, 받는 곳"}, {"t": "쇄토", "p": "흙부수기"}, {"t": "수괴", "p": "두목, 우두머리"}, {"t": "수류지", "p": "물 흐르는 땅"}, {"t": "수목 식재", "p": "나무심기"}, {"t": "수범", "p": "모범"}, {"t": "수보 기관", "p": "보고받는 기관"}, {"t": "수의 시담", "p": "가격 협의"}, {"t": "수지품", "p": "휴대품"}, {"t": "스마트그리드", "p": "지능형 전력망"}, {"t": "스타디움", "p": "경기장"}, {"t": "스태프", "p": "제작진, 진행 요원"}, {"t": "스탠더드", "p": "표준, 기준"}, {"t": "스테이지", "p": "무대"}, {"t": "스파크", "p": "불꽃"}, {"t": "스페어", "p": "여분, 예비"}, {"t": "스피드 건", "p": "속도 측정기"}, {"t": "슬관절", "p": "무릎 관절"}, {"t": "습벽", "p": "나쁜 습성, 버릇"}, {"t": "시건", "p": "잠금"}, {"t": "시말서", "p": "경위서"}, {"t": "시방서", "p": "설명서"}, {"t": "식부 면적", "p": "심은 면적"}, {"t": "신드롬", "p": "증후군"}, {"t": "실기 사건", "p": "때 놓친 사건"}, {"t": "심결", "p": "심리 결정"}, {"t": "심득 사항", "p": "마음에 새길 일"}, {"t": "심토", "p": "속흙, 깊은 흙"}, {"t": "쓰레기 하치장", "p": "쓰레기 처리장"}, {"t": "아나고", "p": "붕장어"}, {"t": "아우트라인", "p": "윤곽, 테두리, 윤곽선"}, {"t": "아이덴티티", "p": "정체성"}, {"t": "안검", "p": "눈꺼풀"}, {"t": "안료", "p": "물감"}, {"t": "안면부", "p": "얼굴 부위"}, {"t": "안출", "p": "생각해 냄"}, {"t": "압인대", "p": "도장 찍는 곳"}, {"t": "압착", "p": "① 눌러 붙임, ② 눌러 짜냄"}, {"t": "앙등하다", "p": "오르다, 뛰어오르다"}, {"t": "앙케트", "p": "설문조사"}, {"t": "애버리지", "p": "평균"}, {"t": "액세스", "p": "① 접근, ② 접속"}, {"t": "액제", "p": "물약"}, {"t": "앰뷸런스", "p": "구급차"}, {"t": "양건 예금", "p": "구속성 예금, 대출 조건부 예금"}, {"t": "양여", "p": "넘겨줌"}, {"t": "어드바이스", "p": "도움말, 조언, 충고"}, {"t": "어유", "p": "물고기 기름"}, {"t": "어젠다", "p": "의제"}, {"t": "언더라인", "p": "밑줄"}, {"t": "언더커팅", "p": "① 홈파기, ② 내려깎기, ③ 끊어쳐 날리기"}, {"t": "엄수하다", "p": "꼭 지키다, 반드시 지키다"}, {"t": "엄책", "p": "엄하게 꾸짖음"}, {"t": "업황", "p": "업무 현황, 업계 현황"}, {"t": "에러", "p": "① 실수, 실책, 잘못, ② 오류"}, {"t": "에코맘", "p": "친환경주부, 환경 친화 주부"}, {"t": "에티켓", "p": "① 예절, 예의, ② 품위"}, {"t": "에피소드", "p": "일화"}, {"t": "에필로그", "p": "끝말, 후기"}, {"t": "엑기스", "p": "진액, 농축액"}, {"t": "엑스포", "p": "박람회"}, {"t": "엔지니어링", "p": "공학"}, {"t": "엘리베이터", "p": "승강기"}, {"t": "여구 검사", "p": "짐 검사"}, {"t": "여입 결의", "p": "회수 결정"}, {"t": "여입금", "p": "회수금"}, {"t": "여히", "p": "같이"}, {"t": "연면적", "p": "총면적, 전체 면적"}, {"t": "연초", "p": "담배"}, {"t": "염두에 두어", "p": "생각하여, 고려하여"}, {"t": "예가", "p": "예정 가격"}, {"t": "예비 간벌", "p": "미리 솎아베기"}, {"t": "예산지변과목", "p": "예산 과목"}, {"t": "예하 기관", "p": "소속 기관"}, {"t": "오너", "p": "소유주"}, {"t": "오물 투기", "p": "쓰레기 버리기"}, {"t": "오일", "p": "기름, 석유"}, {"t": "오토메이션", "p": "① 자동, ② 자동화"}, {"t": "오토클레이브", "p": "멸균기"}, {"t": "오토피더", "p": "자동 투입기"}, {"t": "오픈마켓", "p": "열린 시장, 열린 장터"}, {"t": "오피니언 리더", "p": "① 여론 주도자, ② 여론 주도층"}, {"t": "와가", "p": "기와집"}, {"t": "와이어로프", "p": "쇠밧줄"}, {"t": "와이파이", "p": "근거리 무선망"}, {"t": "와이프", "p": "아내, 처, 부인"}, {"t": "외주연", "p": "바깥 둘레"}, {"t": "외포심", "p": "두려움"}, {"t": "요계표", "p": "집계표"}, {"t": "우각", "p": "쇠뿔, 소뿔"}, {"t": "우수 무지", "p": "오른 엄지"}, {"t": "우육", "p": "쇠고기, 소고기"}, {"t": "우측 상단", "p": "오른쪽 위, 오른쪽 위끝"}, {"t": "우측단", "p": "오른쪽 끝"}, {"t": "우편낭", "p": "우편 자루"}, {"t": "운휴 차량", "p": "쉬는 차"}, {"t": "워터파크", "p": "물놀이 공원"}, {"t": "웰빙", "p": "참살이"}, {"t": "위격 검사", "p": "규격 검사"}, {"t": "위규", "p": "규정 위반"}, {"t": "위식", "p": "거짓"}, {"t": "윈윈", "p": "상생"}, {"t": "유도 표지판", "p": "안내 표지판, 알림 표지판"}, {"t": "유류한", "p": "남겨 놓은"}, {"t": "유치 증서", "p": "보관 증서"}, {"t": "유탈", "p": "빠뜨림"}, {"t": "유해 조수", "p": "해로운 짐승, 유해 짐승"}, {"t": "윤허", "p": "허락, 허가"}, {"t": "윤화", "p": "교통사고"}, {"t": "음용수", "p": "먹는 물, 마시는 물"}, {"t": "응당일", "p": "그날"}, {"t": "의낭", "p": "호주머니, 옷 주머니"}, {"t": "의료 수가", "p": "진료비, 치료비"}, {"t": "이격 거리", "p": "떨어진 거리"}, {"t": "이니셜", "p": "머리글자"}, {"t": "이데올로기", "p": "이념, 사상"}, {"t": "이메일", "p": "전자우편"}, {"t": "이토", "p": "① 진흙, ② 갯벌"}, {"t": "익년/익년도", "p": "다음 해, 이듬해"}, {"t": "익월", "p": "다음 달"}, {"t": "익일", "p": "다음 날, 이튿날"}, {"t": "인감 개인", "p": "인감 변경"}, {"t": "인덱스", "p": "찾아보기"}, {"t": "인입선", "p": "끌어들임줄, 끌어들임선"}, {"t": "인치하다", "p": "끌어오다"}, {"t": "인터체인지", "p": "나들목"}, {"t": "인턴", "p": "실습, 실습 사원"}, {"t": "인포메이션", "p": "① 정보, ② 안내"}, {"t": "인프라", "p": "기반"}, {"t": "일광 신호경", "p": "신호 거울"}, {"t": "일러스트레이션", "p": "삽화, 도안"}, {"t": "일렉트로닉", "p": "전자"}, {"t": "일부인", "p": "날짜 도장"}, {"t": "일조점호", "p": "아침점호"}, {"t": "입방미터", "p": "세제곱미터, m3"}, {"t": "입보하다", "p": "보증 서다"}, {"t": "입출항계", "p": "입출항 신고서"}, {"t": "자모회", "p": "어머니회"}, {"t": "자양물", "p": "영양물"}, {"t": "작야", "p": "어젯밤"}, {"t": "잔전", "p": "잔돈"}, {"t": "잔존 채권", "p": "남은 채권"}, {"t": "잠농", "p": "누에 농사, 양잠"}, {"t": "잠업", "p": "누에치기, 양잠 산업"}, {"t": "장리자", "p": "관리자"}, {"t": "장제비", "p": "장례비"}, {"t": "장치 물품", "p": "보관 물품"}, {"t": "재근지", "p": "근무지"}, {"t": "재도 증서", "p": "재교부 증서"}, {"t": "재획정", "p": "다시 정함"}, {"t": "저감", "p": "① 낮춤, ② 줄임"}, {"t": "저락", "p": "내림, 떨어짐"}, {"t": "적사장", "p": "모래터"}, {"t": "적요", "p": "요점, 주요 내용, 골자"}, {"t": "적의 처리", "p": "알맞게 처리, 적절히 처리"}, {"t": "적치하다", "p": "쌓아 놓다, 쌓아 두다"}, {"t": "전자유기장", "p": "전자오락실"}, {"t": "절분 기능", "p": "분리 기능"}, {"t": "절체 작업", "p": "교체 작업"}, {"t": "절취선", "p": "자르는 선"}, {"t": "정부 대상금", "p": "대정부 대출금, 정부 대출금"}, {"t": "정부 대하금", "p": "대정부 차입금, 정부 차입금"}, {"t": "정히", "p": "바로, 틀림없이"}, {"t": "제반 정상", "p": "여러 사정, 모든 사정"}, {"t": "제스처", "p": "몸짓"}, {"t": "조상 배정", "p": "당겨 배정, 앞당겨 배정"}, {"t": "조상 징수", "p": "앞당겨 받음, 앞당겨 거둠"}, {"t": "족관절", "p": "발목 관절"}, {"t": "종단 방향", "p": "세로 방향"}, {"t": "종서", "p": "세로쓰기"}, {"t": "죽재", "p": "대나무"}, {"t": "준용 하천", "p": "지방 관리 하천"}, {"t": "즉납", "p": "즉시 납부"}, {"t": "즉보", "p": "즉시 보고"}, {"t": "지급필", "p": "지급 끝남, 지급 완료, 지급함, 지급했음, 지급 끝냄"}, {"t": "직상층", "p": "바로 위층"}, {"t": "진균", "p": "곰팡이"}, {"t": "진동 개소", "p": "흔들리는 곳"}, {"t": "집찰구", "p": "표 내는 곳"}, {"t": "집표구", "p": "표 내는 곳"}, {"t": "징벌에 처하다", "p": "처벌하다"}, {"t": "징병서", "p": "징병 검사서"}, {"t": "차년도", "p": "다음 해, 다음 연도"}, {"t": "차압", "p": "압류, 잡아둠"}, {"t": "차폐 식수", "p": "가림나무, 심기"}, {"t": "채마밭", "p": "채소밭"}, {"t": "채종림", "p": "씨받이 숲"}, {"t": "채증", "p": "증거 수집"}, {"t": "척박지", "p": "메마른 땅"}, {"t": "척사", "p": "윷놀이"}, {"t": "천공충", "p": "구멍벌레"}, {"t": "첨단 벌채", "p": "끝자르기"}, {"t": "첩로", "p": "지름길"}, {"t": "청고병", "p": "풋마름병, 시들병"}, {"t": "체결 행낭", "p": "묶은 자루"}, {"t": "체류지", "p": "머무는 곳"}, {"t": "체크 보드", "p": "기록판"}, {"t": "초도 순시", "p": "첫 방문, 첫 둘러보기"}, {"t": "초두", "p": "첫머리, 애초"}, {"t": "촉수 엄금", "p": "손대지 마십시오"}, {"t": "최번 시", "p": "가장 바쁠 때"}, {"t": "최전열", "p": "맨 앞줄"}, {"t": "최촉하다", "p": "재촉하다, 독촉하다"}, {"t": "추곡 수매가", "p": "벼 사들이는 값"}, {"t": "추완", "p": "추가 보완"}, {"t": "출계자", "p": "양자 간 아들"}, {"t": "출원", "p": "원서 제출, 원서 냄, 청원"}, {"t": "취명하다", "p": "울리다"}, {"t": "층고", "p": "층높이"}, {"t": "치잠", "p": "애누에, 어린누에"}, {"t": "카드 리더", "p": "카드 판독기"}, {"t": "카운슬러", "p": "상담사, 길잡이"}, {"t": "카운슬링", "p": "상담"}, {"t": "카운터", "p": "계산대"}, {"t": "카테고리", "p": "범주, 갈래"}, {"t": "카풀/카풀제", "p": "승용차 함께 타기"}, {"t": "캐비아", "p": "철갑상어알"}, {"t": "캐시카드", "p": "현금카드"}, {"t": "캐치프레이즈", "p": "구호"}, {"t": "캘린더", "p": "달력"}, {"t": "캡처", "p": "갈무리, 장면 갈무리, 화면 담기"}, {"t": "커리어우먼", "p": "전문직여성"}, {"t": "커뮤니케이션", "p": "소통"}, {"t": "커미션", "p": "수수료, 구전"}, {"t": "커버", "p": "덮개, 가리개, 씌우개"}, {"t": "컨버전", "p": "변환"}, {"t": "컨소시엄", "p": "연합체"}, {"t": "컨펌", "p": "확인, 확정"}, {"t": "컴프레서", "p": "① 압축기, 압착기, ② 강우기"}, {"t": "코너", "p": "① 구석, 모퉁이, 구역, ② 쪽, ③ 꼭지(방송 프로그램 용어)"}, {"t": "코멘트 자료", "p": "설명 자료"}, {"t": "코스트", "p": "비용"}, {"t": "쿼터제", "p": "할당제, 의무 할당제, 의무 배당제"}, {"t": "크랙", "p": "균열, 갈라짐"}, {"t": "크레디트카드", "p": "신용카드"}, {"t": "키", "p": "열쇠"}, {"t": "키오스크", "p": "① 무인안내기, 무인 단말기, ② 간이 판매대, 간이 매장"}, {"t": "키포인트", "p": "요점, 핵심"}, {"t": "타깃", "p": "과녁, 표적, 목표"}, {"t": "타액", "p": "침"}, {"t": "타월", "p": "수건"}, {"t": "타이틀", "p": "제목, 표제"}, {"t": "타이핑", "p": "타자"}, {"t": "타임 래그", "p": "시차"}, {"t": "타임 테이블", "p": "시간표"}, {"t": "타입", "p": "① 모양, ② 유형"}, {"t": "턴키 공사", "p": "일괄 공사"}, {"t": "테마", "p": "주제"}, {"t": "테이블 다이어리", "p": "탁상일기"}, {"t": "테이블 세팅", "p": "상차림"}, {"t": "테크닉", "p": "기교, 기술, 솜씨"}, {"t": "텔레마케팅", "p": "전화판매, 통신판매"}, {"t": "템포", "p": "속도, 박자"}, {"t": "토괴", "p": "흙덩이"}, {"t": "토사도", "p": "흙길"}, {"t": "톨게이트", "p": "요금소"}, {"t": "톱클래스", "p": "정상급"}, {"t": "투어콘서트", "p": "순회공연"}, {"t": "투잡", "p": "겹벌이, 겸업"}, {"t": "트레이닝복", "p": "운동복"}, {"t": "티오", "p": "정원"}, {"t": "티케팅", "p": "① 표사기, 표팔기, 표사고팔기, ② 검표, 표검사"}, {"t": "티켓", "p": "표"}, {"t": "파울", "p": "반칙"}, {"t": "파워", "p": "힘, 권력"}, {"t": "파워 게임", "p": "권력 다툼, 세력 다툼"}, {"t": "파일럿", "p": "조종사, 뱃길잡이"}, {"t": "파출 검사", "p": "출장 검사"}, {"t": "파출 수납", "p": "출장 수납"}, {"t": "파트너십", "p": "동반 관계"}, {"t": "파트타임", "p": "시간제근무"}, {"t": "패널", "p": "토론자"}, {"t": "패러독스", "p": "역설"}, {"t": "퍼포먼스 예술", "p": "행위예술"}, {"t": "편린", "p": "일면, 한 단면, 조각"}, {"t": "편평족", "p": "편발, 편평발, 평발"}, {"t": "폐치 분합/폐합", "p": "없애고 합침"}, {"t": "포락지", "p": "무너진 곳"}, {"t": "포말 소화기", "p": "거품 소화기"}, {"t": "포커스", "p": "초점"}, {"t": "포태", "p": "임신, 새끼배기"}, {"t": "표찰", "p": "① 이름표, ② 표지판"}, {"t": "프라이버시", "p": "사생활"}, {"t": "프라임 레이트", "p": "우대 금리"}, {"t": "플라자", "p": "① 광장, ② 상가"}, {"t": "플래카드", "p": "펼침막, 현수막"}, {"t": "피견인차", "p": "끌려가는 차"}, {"t": "피날레", "p": "마지막"}, {"t": "피니시", "p": "끝"}, {"t": "피맥", "p": "겉보리"}, {"t": "피아르", "p": "홍보"}, {"t": "피혁", "p": "가죽"}, {"t": "픽션", "p": "허구"}, {"t": "핀트", "p": "초점"}, {"t": "필경", "p": "마침내"}, {"t": "필연대", "p": "기록대, 쓰는 곳"}, {"t": "필한 자", "p": "마친 사람"}, {"t": "하구언", "p": "강어귓둑, 강어귀의 둑"}, {"t": "하기", "p": "아래, 다음"}, {"t": "하대두", "p": "여름콩"}, {"t": "하도부", "p": "보냄 장부"}, {"t": "하이웨이", "p": "고속도로"}, {"t": "하이테크", "p": "첨단기술"}, {"t": "핫이슈", "p": "주요 쟁점"}, {"t": "해촉", "p": "위촉 해제, 위촉을 끝냄, 맡김을 끝냄"}, {"t": "행락철", "p": "나들이철"}, {"t": "헤게모니", "p": "주도권"}, {"t": "헬멧", "p": "안전모"}, {"t": "협조전", "p": "협조문"}, {"t": "협착", "p": "① 끼워 붙이기, ② 좁음, 끼임"}, {"t": "화물 적하", "p": "짐 내리기, 짐 부림"}, {"t": "확행 바랍니다", "p": "꼭 하시기 바랍니다"}, {"t": "환금 작물", "p": "수익 작물, 돈벌이 작물"}, {"t": "환시산표", "p": "환검산표"}, {"t": "회납금", "p": "반납금"}, {"t": "회보하다", "p": "알려 주다"}, {"t": "회시하다", "p": "회답하다"}, {"t": "횡서", "p": "가로쓰기"}, {"t": "휴반 소각", "p": "두렁태우기"}, {"t": "흉고 직경", "p": "가슴높이 지름"}, {"t": "흉골", "p": "앞가슴뼈"}, {"t": "흉위", "p": "가슴둘레"}, {"t": "가건물", "p": "임시 건물"}, {"t": "가건축", "p": "임시 건축"}, {"t": "가검물", "p": "검사 대상물"}, {"t": "가결의", "p": "임시 결의"}, {"t": "가계약", "p": "임시 계약"}, {"t": "가계정", "p": "임시 계정"}, {"t": "가도", "p": "임시 도로"}, {"t": "가부 동수", "p": "찬반 동수"}, {"t": "가사용", "p": "임시 사용"}, {"t": "가설무대", "p": "임시 무대"}, {"t": "가이드", "p": "① 안내자, 안내원, 길잡이, ② 지침서, 안내서, 길잡이"}, {"t": "가이드라인", "p": "지침, 방침"}, {"t": "가이드북", "p": "안내서, 지침서"}, {"t": "간선도로", "p": "주요 도로, 중심 도로"}, {"t": "개찰구", "p": "표 내는 곳"}, {"t": "개토", "p": "땅파기"}, {"t": "거래선", "p": "거래처"}, {"t": "건폐율", "p": "건물 비율, 건평률"}, {"t": "계리", "p": "회계 처리"}, {"t": "고수부지", "p": "둔치"}, {"t": "고저", "p": "높낮이"}, {"t": "과당 경쟁", "p": "과열 경쟁, 지나친 경쟁"}, {"t": "관유물", "p": "공공기관의 물건"}, {"t": "교면 포장", "p": "교량 포장, 다리 포장"}, {"t": "구배", "p": "① 기울기, ② 물매, 비탈, 오르막"}, {"t": "구휼", "p": "구호, 구제"}, {"t": "국지", "p": "일부 지역"}, {"t": "굴토", "p": "땅파기"}, {"t": "그린벨트", "p": "개발제한구역"}, {"t": "그린웨이", "p": "녹색길, 보행자·자전거 전용 도로, 산책로, 산책길"}, {"t": "그린카", "p": "친환경차"}, {"t": "글로벌 스탠더드", "p": "국제 표준"}, {"t": "금일", "p": "오늘"}, {"t": "난굴", "p": "마구 파냄"}, {"t": "내비게이션", "p": "길도우미, 길안내기"}, {"t": "내역서", "p": "명세서"}, {"t": "네트워크/네트워킹", "p": "연결망, 연계망, 관계망"}, {"t": "네티즌", "p": "누리꾼"}, {"t": "노미네이트", "p": "후보 지명"}, {"t": "노하우", "p": "비법, 기술, 비결"}, {"t": "노후 시설/\n노후한 시설", "p": "낡은 시설"}, {"t": "뉴스레터", "p": "소식지"}, {"t": "닉네임", "p": "별명"}, {"t": "다운사이징", "p": "감축, 축소, 줄이기"}, {"t": "단차", "p": "높낮이 차이"}, {"t": "답보", "p": "제자리걸음"}, {"t": "당년", "p": "올해, 그해"}, {"t": "당월", "p": "이번 달, 그달"}, {"t": "당일", "p": "오늘, 그날"}, {"t": "대사", "p": "대조 확인"}, {"t": "대조 공부", "p": "장부 확인, 장부 대조"}, {"t": "대합실", "p": "맞이방"}, {"t": "더치페이", "p": "각자내기, 추렴"}, {"t": "도장 공사", "p": "칠 공사, 도색 공사"}, {"t": "독거노인", "p": "홀로노인, 홀로 사는 노인, 홀몸노인"}, {"t": "동법", "p": "① 같은 법, ② 같은 방법, 같은 수법"}, {"t": "동절기", "p": "겨울철"}, {"t": "드레싱", "p": "① 맛깔장, ② 상처 치료, 상처 치료약"}, {"t": "디브레인", "p": "디지털 예산 회계 시스템"}, {"t": "디아이와이", "p": "손수 짜기, 직접 만들기, 손수 제작"}, {"t": "디엠", "p": "우편 광고, 우편 광고물"}, {"t": "디지털포렌식", "p": "전자법의학"}, {"t": "라이브러리", "p": "자료관, 도서관"}, {"t": "라이선스", "p": "사용권, 면허, 면허장, 허가, 허가장"}, {"t": "랜드마크", "p": "마루지"}, {"t": "러브 라인", "p": "사랑 구도"}, {"t": "레저", "p": "여가"}, {"t": "로고", "p": "상징"}, {"t": "로고송", "p": "상징 노래"}, {"t": "로드 무비", "p": "여정 영화"}, {"t": "로드맵", "p": "이행안, 단계별 이행안"}, {"t": "로드쇼", "p": "홍보 마당"}, {"t": "로드킬", "p": "동물 찻길 사고, 동물, 교통사고"}, {"t": "루머", "p": "소문, 뜬소문"}, {"t": "루미나리아", "p": "① 불빛축제, 불빛잔치, ② 불빛시설"}, {"t": "룸메이트", "p": "방짝, 방친구"}, {"t": "리더십", "p": "지도력"}, {"t": "리드미컬하다", "p": "율동적이다"}, {"t": "리메이크", "p": "원작 재구성"}, {"t": "리빙룸", "p": "거실"}, {"t": "리콜", "p": "① 결함 보상, 결함 보상제, ② 불러들임"}, {"t": "리폼", "p": "개량, 수선"}, {"t": "마리나", "p": "해안유원지"}, {"t": "마블링", "p": "결지방"}, {"t": "마스터클래스", "p": "명인 강좌"}, {"t": "마이너스", "p": "① 적자, 빼기, 모자람, 손해, ② 음극, ③ 음성"}, {"t": "마일리지", "p": "이용 실적 점수, 이용 실적"}, {"t": "마케팅", "p": "① 광고, 홍보, ② 시장 거래, 시장 관리, ③ 영업, 판매"}, {"t": "마켓", "p": "시장"}, {"t": "마크맨", "p": "전담 요원"}, {"t": "매너리즘", "p": "타성"}, {"t": "매뉴얼", "p": "설명서, 안내서, 지침"}, {"t": "매점매석", "p": "사재기"}, {"t": "매치업", "p": "맞대결"}, {"t": "매칭그랜트", "p": "동반 기부"}, {"t": "매칭펀드", "p": "대응 투자금"}, {"t": "매표소", "p": "표 사는 곳"}, {"t": "맹지", "p": "배후 토지, 도로 없는 땅"}, {"t": "머스트해브", "p": "필수품"}, {"t": "멀티미디어", "p": "다중 매체, 복합 매체"}, {"t": "메디컬 비자", "p": "의료 비자, 의료 사증"}, {"t": "메디컬 콜 센터", "p": "전화 의료 상담실"}, {"t": "메신저", "p": "쪽지창"}, {"t": "메카", "p": "중심, 중심지"}, {"t": "멘토", "p": "조언자, 인생길잡이"}, {"t": "멘토링", "p": "① 지도, ② 조언, ③ 상담, ④ 후원"}, {"t": "멜로디", "p": "가락"}, {"t": "명일", "p": "내일"}, {"t": "모니터링", "p": "점검, 관찰, 감시, 살피기"}, {"t": "모바일", "p": "① 이동, 이동식, ② 이동통신"}, {"t": "모티켓", "p": "통신 예절"}, {"t": "모티프/모티브", "p": "동기"}, {"t": "몽리 면적", "p": "수혜 면적, 수혜 넓이, 수혜 지역"}, {"t": "무빙워크", "p": "자동길"}, {"t": "미디어", "p": "매체"}, {"t": "미션", "p": "중요 임무, 임무"}, {"t": "바비큐", "p": "통구이"}, {"t": "바우처", "p": "상품권, 이용권"}, {"t": "바인더", "p": "① 보관철, 묶음, ② 조임틀, 죔틀"}, {"t": "박스 오피스", "p": "흥행 수익"}, {"t": "반도핑", "p": "약물 복용 반대, 약물 주사 반대"}, {"t": "방침을 득하여", "p": "방침을 받아"}, {"t": "배너", "p": "막대 광고, 띠 광고, 현수막 광고"}, {"t": "버블", "p": "① 거품, ② 거품 현상"}, {"t": "버전", "p": "판"}, {"t": "버튼", "p": "단추, 누름쇠"}, {"t": "보드마커", "p": "칠판펜"}, {"t": "보디라인", "p": "체형"}, {"t": "보이스피싱", "p": "사기 전화"}, {"t": "보텀업", "p": "상향식"}, {"t": "복토", "p": "흙덮기"}, {"t": "불비한", "p": "갖추어지지 않은"}, {"t": "불요불급한", "p": "급하지 않은, 당장 필요하지 않은"}, {"t": "불철주야", "p": "밤낮없이"}, {"t": "불출", "p": "내줌, 치러 줌"}, {"t": "뷰파인더", "p": "보기창"}, {"t": "브랜드 아이덴티티", "p": "① 상표 정체성, ② 상표 일체감"}, {"t": "브랜드 파워", "p": "상표 경쟁력"}, {"t": "브랜드화", "p": "상표화"}, {"t": "브랜딩 C.I.", "p": "기업 이미지 상표화"}, {"t": "브로마이드", "p": "벽붙이사진"}, {"t": "브로슈어", "p": "안내서"}, {"t": "블록", "p": "구역"}, {"t": "비전", "p": "① 전망, ② 이상"}, {"t": "비즈니스\n네트워킹 허브", "p": "사업 연계 중심, 업무 연계 중심"}, {"t": "비즈니스 데스크", "p": "① 사업부서, ② 사업부서장"}, {"t": "사이버", "p": "가상공간"}, {"t": "사토", "p": "모래흙"}, {"t": "상기", "p": "위, 위의"}, {"t": "상기한 바와 같이", "p": "위와 같이"}, {"t": "상당액", "p": "① 해당 금액, ② 많은 금액"}, {"t": "상존", "p": "① 남아 있음, ② 늘 있음"}, {"t": "샐러리맨", "p": "봉급생활자, 급여생활자"}, {"t": "샘플링", "p": "표본추출"}, {"t": "생계비", "p": "생활비"}, {"t": "석식", "p": "저녁밥, 저녁 식사, 저녁"}, {"t": "선루프", "p": "지붕창"}, {"t": "선팅", "p": "빛가림"}, {"t": "세계잉여금", "p": "결산 잔액"}, {"t": "세미나", "p": "발표회, 토론회, 연구회"}, {"t": "세일", "p": "할인판매"}, {"t": "세트 피스", "p": "맞춤전술"}, {"t": "센서스", "p": "총조사"}, {"t": "소맥피", "p": "밀기울"}, {"t": "소셜 네트워크\n서비스/SNS", "p": "① 누리소통망, ② 누리소통망 서비스"}, {"t": "소요", "p": "필요"}, {"t": "소정 양식", "p": "규정 서식"}, {"t": "쇼케이스", "p": "시험 공연, 선보임 공연"}, {"t": "수범 사례", "p": "모범 사례, 잘된 사례"}, {"t": "수취인", "p": "받는 이, 받는 사람"}, {"t": "스마트워크", "p": "원격 근무"}, {"t": "스카이라운지", "p": "전망쉼터, 하늘쉼터"}, {"t": "스캔들", "p": "추문, 뒷소문"}, {"t": "스케줄", "p": "일정, 계획표"}, {"t": "스크랩", "p": "자료 모음, 오려두기, 오려 모으기"}, {"t": "스크린", "p": "화면"}, {"t": "스크린도어", "p": "안전문"}, {"t": "스타일리스트", "p": "맵시가꿈이"}, {"t": "스타팅멤버", "p": "선발 선수, 앞장 선수"}, {"t": "스터디그룹", "p": "공부 모임, 공부 모둠"}, {"t": "스토리", "p": "이야기"}, {"t": "스토리보드", "p": "줄거리판"}, {"t": "스토리텔링", "p": "이야기하기, 이야기 나누기"}, {"t": "스폰서", "p": "① 광고주, 광고 의뢰자, ② 후원자"}, {"t": "스폿광고", "p": "반짝 광고, 중간 광고"}, {"t": "스프레이", "p": "분무기"}, {"t": "승강장", "p": "타는 곳"}, {"t": "시너지", "p": "① 상승, ② 동반 상승"}, {"t": "시운전", "p": "시험 운전"}, {"t": "신분증 패용", "p": "신분증 달기"}, {"t": "실링", "p": "최고 한도액, 최고 한도, 한도액, 상한"}, {"t": "실버시터", "p": "어르신도우미, 경로도우미"}, {"t": "심벌마크", "p": "상징표시, 상징표"}, {"t": "아우라", "p": "기품"}, {"t": "아웃소싱", "p": "외부 용역, 외주"}, {"t": "아이콘", "p": "① 상징, 상징물, ② 그림 단추"}, {"t": "아이피티브이", "p": "맞춤형 누리 텔레비전"}, {"t": "아카이브", "p": "① 자료 보관소, 자료 저장소, 기록 보관, ② 자료 전산화"}, {"t": "아킬레스건", "p": "치명적 약점"}, {"t": "아트 마켓", "p": "예술 시장"}, {"t": "아트 페스티벌", "p": "예술 축전"}, {"t": "아티스트", "p": "예술가"}, {"t": "어시스트", "p": "도움"}, {"t": "언더패스", "p": "아래찻길"}, {"t": "언론 플레이", "p": "여론몰이"}, {"t": "에스오에스", "p": "구원 요청"}, {"t": "에스컬레이터", "p": "자동계단"}, {"t": "에어라이트", "p": "① 풍선 광고, ② 기둥풍선 입간판, 풍선형 입간판, 풍선 입간판"}, {"t": "에이전트", "p": "대리인, 대행인"}, {"t": "엔딩 크레딧", "p": "끝자막, 맺음자막"}, {"t": "엘리트", "p": "정예"}, {"t": "연대채무", "p": "함께 갚을 채무, 줄보증"}, {"t": "연와조", "p": "벽돌 구조"}, {"t": "엽연초", "p": "잎담배"}, {"t": "영조물", "p": "① 공공시설물, ② 건축물, ③ 시설물"}, {"t": "예수금", "p": "임시 받은 금액"}, {"t": "예탁금", "p": "임시 맡긴 금액, 미리 맡긴 금액"}, {"t": "오일볼", "p": "기름 뭉치"}, {"t": "오일쇼크", "p": "석유 파동"}, {"t": "오토프로그램", "p": "자동 프로그램"}, {"t": "오프너", "p": "병따개"}, {"t": "오프라인", "p": "현실공간"}, {"t": "올인", "p": "① 다걸기, ② 집중"}, {"t": "옵션", "p": "선택, 선택 사항"}, {"t": "워밍업", "p": "준비 운동, 준비"}, {"t": "워크숍", "p": "연수회, 수련회"}, {"t": "워킹맘", "p": "직장엄마"}, {"t": "월드 뮤직 페스티벌", "p": "세계 음악 축전, 세계 음악 축제"}, {"t": "웨딩플래너", "p": "결혼도우미"}, {"t": "웹서핑", "p": "웹 검색, 누리 검색, 인터넷 검색"}, {"t": "유관 기관", "p": "관계 기관"}, {"t": "유비쿼터스", "p": "두루누리"}, {"t": "유시시", "p": "손수제작물, 개인제작물"}, {"t": "유어행위", "p": "낚시"}, {"t": "유어행위 금지", "p": "낚시 금지"}, {"t": "유인물", "p": "인쇄물"}, {"t": "유저", "p": "사용자"}, {"t": "유찰", "p": "입찰 무효, 낙찰 무효"}, {"t": "육묘", "p": "모기르기"}, {"t": "육우", "p": "고기소"}, {"t": "이모티콘", "p": "그림말"}, {"t": "이벤트", "p": "① 기획 행사, 행사, ② 사건"}, {"t": "이슈", "p": "쟁점, 문젯거리"}, {"t": "이호조", "p": "지방재정시스템"}, {"t": "인센티브", "p": "① 특전, 성과급, ② 유인책"}, {"t": "인스턴트식품", "p": "즉석식품, 즉석 먹거리, 즉석 먹을거리"}, {"t": "인우", "p": "지인, 이웃"}, {"t": "인터랙티브", "p": "① 쌍방향, 양방향, ② 대화식"}, {"t": "인테리어", "p": "실내 장식"}, {"t": "일괄하여", "p": "한꺼번에, 몰아서"}, {"t": "일시 차입금", "p": "잠시 빌린 돈"}, {"t": "일실치 않도록", "p": "놓치지 않도록, 잃지 않도록"}, {"t": "일용잡급", "p": "일용직"}, {"t": "일할 계산", "p": "날짜 계산, 날수 계산"}, {"t": "잔임 기간", "p": "남은 임기"}, {"t": "잔존 기간", "p": "남은 기간"}, {"t": "저널리즘", "p": "언론"}, {"t": "저류조", "p": "물저장시설"}, {"t": "전수", "p": "모두"}, {"t": "절사", "p": "끊어 버림, 잘라 버림"}, {"t": "점용 허가", "p": "점거 사용 허가"}, {"t": "접속 도로", "p": "연결 도로"}, {"t": "정수 처분", "p": "급수 정지 처분"}, {"t": "제 규정", "p": "여러 규정, 모든 규정"}, {"t": "제 수당", "p": "여러 수당, 모든 수당"}, {"t": "제로베이스", "p": "백지상태, 원점"}, {"t": "제반 요인", "p": "여러 요인, 모든 요인"}, {"t": "제연경계벽", "p": "연기 차단벽"}, {"t": "제척", "p": "제외, 뺌"}, {"t": "조류 인플루엔자", "p": "조류 독감"}, {"t": "조식", "p": "아침밥, 아침 식사, 아침"}, {"t": "중식", "p": "점심밥, 점심 식사, 점심"}, {"t": "집수정", "p": "물 저장고, 물 모이"}, {"t": "집진 시설", "p": "먼지 제거 장치, 먼지 제거 시설"}, {"t": "집하", "p": "수집, 모음"}, {"t": "징구", "p": "걷기, 거두기, 청구"}, {"t": "차면 시설", "p": "가리개, 가림시설"}, {"t": "차폐", "p": "가림"}, {"t": "찬스", "p": "기회"}, {"t": "채널", "p": "① 경로, 통로, ② 텔레비전 번호"}, {"t": "천공", "p": "구멍 뚫기"}, {"t": "첨부 서류", "p": "붙임 서류"}, {"t": "체인", "p": "① 배급망, ② 연쇄 사슬"}, {"t": "체크리스트", "p": "점검표"}, {"t": "출감", "p": "출소"}, {"t": "카시트", "p": "아이안전의자, 안전의자"}, {"t": "카운트다운", "p": "초읽기"}, {"t": "캐스팅보트", "p": "결정권, 결정표"}, {"t": "캠프파이어", "p": "모닥불놀이"}, {"t": "커플룩", "p": "짝꿍차림"}, {"t": "컨디션", "p": "① 조건, ② 상태"}, {"t": "컨설팅", "p": "상담, 자문"}, {"t": "케이스", "p": "① 경우, ② 상자"}, {"t": "코드", "p": "① 부호, ② 성향"}, {"t": "코르사주", "p": "맵시꽃, 옷 장식꽃"}, {"t": "코칭 과학", "p": "지도 과학"}, {"t": "콘셉트", "p": "① 개념, ② 설정"}, {"t": "콘텐츠어워드", "p": "콘텐츠 상, 꾸림정보 상"}, {"t": "콘퍼런스", "p": "회의"}, {"t": "쿠폰", "p": "① 교환권, ② 이용권, ③ 할인권"}, {"t": "큐레이터", "p": "전시기획자"}, {"t": "타운하우스", "p": "공동전원주택"}, {"t": "타이틀곡", "p": "주제곡"}, {"t": "타임 서비스", "p": "반짝할인"}, {"t": "타임캡슐", "p": "기억상자"}, {"t": "태스크포스/\n태스크포스팀", "p": "특별 전담 조직, 전담 조직, 특별팀"}, {"t": "턴키 발주", "p": "일괄 발주, 일괄 주문"}, {"t": "테스터", "p": "체험평가자"}, {"t": "테이블 클로스", "p": "식탁보"}, {"t": "템플릿", "p": "서식"}, {"t": "토털", "p": "합계, 총계"}, {"t": "톱다운", "p": "하향식"}, {"t": "통로암거", "p": "지하 통로"}, {"t": "투어", "p": "관광여행"}, {"t": "트랜스 지방", "p": "변이지방"}, {"t": "트레일", "p": "탐방로"}, {"t": "팁", "p": "① 도움말, ② 봉사료"}, {"t": "파일", "p": "서류철, 서류묶음"}, {"t": "파일럿 프로그램", "p": "맛보기 프로그램"}, {"t": "파트", "p": "부분, 일부"}, {"t": "파트너", "p": "동반자"}, {"t": "팝업창", "p": "알림창"}, {"t": "패딩", "p": "누비옷"}, {"t": "패셔니스타", "p": "맵시꾼"}, {"t": "패키지 디자인", "p": "묶음 디자인, 꾸러미 디자인"}, {"t": "패키지 상품", "p": "① 꾸러미 상품, ② 기획 상품"}, {"t": "팩스/팩시밀리", "p": "전송"}, {"t": "팸투어", "p": "사전 답사 여행, 홍보 여행, 초청 홍보 여행"}, {"t": "퍼블리시티권", "p": "초상 사용권, 초상권"}, {"t": "펀드", "p": "기금, 자금"}, {"t": "페스티벌", "p": "축전, 축제"}, {"t": "펜네임", "p": "필명"}, {"t": "포럼", "p": "토론회, 공개 토론회"}, {"t": "포맷", "p": "양식, 서식, 형식"}, {"t": "포스트잇", "p": "붙임쪽지"}, {"t": "포토존", "p": "사진 촬영 구역, 촬영 구역, 사진 찍는 곳"}, {"t": "풀 세트", "p": "다 모음, 온벌"}, {"t": "프라임 시간대", "p": "황금 시간대, 주시청시간대"}, {"t": "프러포즈", "p": "제안, 구애, 청혼"}, {"t": "프레 콘서트", "p": "사전 공연, 사전 연주회"}, {"t": "프레젠테이션", "p": "① 시청각 설명, ② 시청각 설명회"}, {"t": "프로슈머", "p": "참여형 소비자"}, {"t": "프로필", "p": "인물 소개, 약력"}, {"t": "플라모델", "p": "조립 모형, 조립장난감"}, {"t": "플리 바기닝", "p": "자백감형제, 자백감형제도"}, {"t": "피엘상품", "p": "자체 기획 상품"}, {"t": "피켓", "p": "팻말, 손팻말"}, {"t": "피크 기간", "p": "집중 기간"}, {"t": "하이파이브", "p": "손뼉맞장구"}, {"t": "하절기", "p": "여름철"}, {"t": "하중", "p": "① 짐무게, ② 부담"}, {"t": "해태하다", "p": "게을리하다, 제때 하지 않다"}, {"t": "핸드폰/휴대폰", "p": "휴대전화, 손전화"}, {"t": "핸드프린팅", "p": "기념손찍기"}, {"t": "호안", "p": "기슭 보호, 둑 보호"}, {"t": "호우", "p": "큰비"}, {"t": "홈스테이", "p": "가정 체험, 가정집묵기"}, {"t": "홈헬퍼", "p": "가사도우미, 가정도우미"}, {"t": "확폭", "p": "폭 넓히기"}, {"t": "환가", "p": "가치 환산, 값어치, 환산 가액, 환산 값어치"}, {"t": "횡풍 주의", "p": "옆바람 주의"}, {"t": "휘핑 크림", "p": "거품크림"}, {"t": "휴테크", "p": "여가 활용 기술"}, {"t": "~ 게이트", "p": "~ 의혹사건"}, {"t": "Job Networking", "p": "일 연계망 형성, 일자리 연계망 형성"}, {"t": "OA", "p": "사무자동화"}, {"t": "OS", "p": "운영체계, 운영체제"}, {"t": "R&D", "p": "연구 개발"}, {"t": "RFID", "p": "전파 식별"}, {"t": "SOC", "p": "① 사회 기반 시설, ② 사회 간접 자본"}, {"t": "VOD", "p": "① 다시보기, ② 주문형 비디오"}];
+
+// ==========================================
+// 2. 상태 및 사전 컴파일 엔진 (로컬 스토리지 연동)
+// ==========================================
+let activeDictionary = [];
+let customDictionary = JSON.parse(localStorage.getItem('seocho_custom_dict') || '[]');
+let ignoreWords = JSON.parse(localStorage.getItem('seocho_ignore_words') || '[]');
+let TERM_MAP = new Map();
+let MASTER_REGEX = null;
+
+function parseCandidates(purifiedStr) {
+  const cleaned = String(purifiedStr).replace(/[①②③④⑤⑥⑦⑧⑨⑩]/g, '').trim();
+  const parts = cleaned.split(',').map(s => s.trim()).filter(Boolean);
+  return Array.from(new Set(parts));
+}
+
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function rebuildDictionaryEngine(baseList = BASE_DICTIONARY) {
+  const merged = [
+    ...customDictionary.map(item => ({ ...item, source: '사용자 추가' })),
+    ...baseList.map(item => ({ ...item, source: '기본 사전' }))
+  ];
+  activeDictionary = merged;
+
+  const expanded = [];
+  const ignoreSet = new Set(ignoreWords.map(w => w.trim()));
+
+  merged.forEach((item, idx) => {
+    const parts = String(item.t).split('/').map(s => s.trim()).filter(Boolean);
+    const candidates = parseCandidates(item.p);
+    parts.forEach(term => {
+      const cleanTerm = term.replace(/^~\s*/, '').trim();
+      if (cleanTerm && !ignoreSet.has(cleanTerm)) {
+        expanded.push({
+          term: cleanTerm,
+          rawPurified: item.p,
+          candidates: candidates.length > 0 ? candidates : [item.p],
+          index: idx + 1,
+          source: item.source
+        });
+      }
+    });
+  });
+
+  // 긴 복합어 우선 매칭
+  expanded.sort((a, b) => b.term.length - a.term.length);
+
+  TERM_MAP = new Map();
+  expanded.forEach(entry => {
+    if (!TERM_MAP.has(entry.term)) {
+      TERM_MAP.set(entry.term, entry);
+    }
+  });
+
+  const keys = Array.from(TERM_MAP.keys()).map(escapeRegExp);
+  MASTER_REGEX = keys.length > 0 ? new RegExp(keys.join('|'), 'g') : null;
+
+  document.getElementById('dictCountBadge').textContent = `순화 사전: ${activeDictionary.length.toLocaleString()}개 (제외 ${ignoreSet.size}개)`;
+}
+
+// ==========================================
+// 3. 한국어 받침 판별 및 조사 자동 교정 엔진
+// ==========================================
+function hasFinalConsonant(word) {
+  if (!word) return false;
+  const clean = word.replace(/\(.*?\)/g, '').trim();
+  if (!clean) return false;
+  const lastChar = clean[clean.length - 1];
+  const code = lastChar.charCodeAt(0);
+
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    return ((code - 0xAC00) % 28) !== 0;
+  }
+  if (/[0-9]/.test(lastChar)) {
+    return ['0', '1', '3', '6', '7', '8'].includes(lastChar);
+  }
+  return false;
+}
+
+function isRieulFinal(word) {
+  const clean = word.replace(/\(.*?\)/g, '').trim();
+  if (!clean) return false;
+  const lastChar = clean[clean.length - 1];
+  const code = lastChar.charCodeAt(0);
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    return ((code - 0xAC00) % 28) === 8;
+  }
+  if (/[0-9]/.test(lastChar)) {
+    return ['1', '7', '8'].includes(lastChar);
+  }
+  return false;
+}
+
+function adjustFollowingParticle(replacementWord, afterText) {
+  if (!afterText || !replacementWord) return { particle: '', rest: afterText };
+  const hasBatchim = hasFinalConsonant(replacementWord);
+  const hasRieul = isRieulFinal(replacementWord);
+
+  const rules = [
+    {
+      pattern: /^(으로는|로써|로서|으로|로)(?=[\s.,!?;:'"\)\]]|$)/,
+      fix: (m) => {
+        const suffix = m.replace(/^(으로|로)/, '');
+        const base = (!hasBatchim || hasRieul) ? '로' : '으로';
+        return base + suffix;
+      }
+    },
+    {
+      pattern: /^(을|를)(?=[\s.,!?;:'"\)\]]|$)/,
+      fix: () => hasBatchim ? '을' : '를'
+    },
+    {
+      pattern: /^(이|가)(?=[\s.,!?;:'"\)\]]|$)/,
+      fix: () => hasBatchim ? '이' : '가'
+    },
+    {
+      pattern: /^(은|는)(?=[\s.,!?;:'"\)\]]|$)/,
+      fix: () => hasBatchim ? '은' : '는'
+    },
+    {
+      pattern: /^(과|와)(?=[\s.,!?;:'"\)\]]|$)/,
+      fix: () => hasBatchim ? '과' : '와'
+    },
+    {
+      pattern: /^(이라고|라고|이라는|라는|이라면|라면|이라도|라도|이라|라)(?=[\s.,!?;:'"\)\]]|$)/,
+      fix: (m) => {
+        const base = m.replace(/^이/, '');
+        return hasBatchim ? '이' + base : base;
+      }
+    },
+    {
+      pattern: /^(이야|야|이여|여)(?=[\s.,!?;:'"\)\]]|$)/,
+      fix: (m) => {
+        const base = m.replace(/^이/, '');
+        return hasBatchim ? '이' + base : base;
+      }
+    }
+  ];
+
+  for (const rule of rules) {
+    const match = afterText.match(rule.pattern);
+    if (match) {
+      const origParticle = match[1];
+      return {
+        particle: rule.fix(origParticle),
+        rest: afterText.slice(origParticle.length)
+      };
+    }
+  }
+  return { particle: '', rest: afterText };
+}
+
+// ==========================================
+// 4. 오탐 방지 보호 구간 계산 (괄호/따옴표/법령명)
+// ==========================================
+function getProtectedRanges(text) {
+  const ranges = [];
+  if (document.getElementById('protectQuotes').checked) {
+    const quoteRegex = /(「[^」\n]+」|『[^』\n]+』|'[^'\n]{2,40}'|"[^"\n]{2,40}"|\[[^\]\n]{2,30}\])/g;
+    let m;
+    while ((m = quoteRegex.exec(text)) !== null) {
+      ranges.push({ start: m.index, end: m.index + m[0].length, reason: '인용·명칭 괄호 보호' });
+    }
+  }
+  if (document.getElementById('protectLawTerms').checked) {
+    const lawRegex = /[가-힣A-Za-z0-9·\s]{2,25}(?:법|시행령|시행규칙|조례|규칙|지침|기준)(?=[」』\s.,\)]|$)/g;
+    let m;
+    while ((m = lawRegex.exec(text)) !== null) {
+      ranges.push({ start: m.index, end: m.index + m[0].length, reason: '법령·규정명 보호' });
+    }
+  }
+  return ranges;
+}
+
+function checkProtectionReason(start, end, ranges) {
+  for (const r of ranges) {
+    if (start >= r.start && end <= r.end) return r.reason;
+  }
+  return null;
+}
+
+// ==========================================
+// 5. 본문 분석 및 렌더링 로직
+// ==========================================
+let segments = [];
+let isManuallyEdited = false;
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function updateCharCount() {
+  const val = document.getElementById('sourceText').value;
+  const withSpace = val.length;
+  const withoutSpace = val.replace(/\s/g, '').length;
+  document.getElementById('charCounter').textContent =
+    `공백 포함: ${withSpace.toLocaleString()}자 / 제외: ${withoutSpace.toLocaleString()}자`;
+}
+
+function updateResultCharCount() {
+  const plain = getCleanPlainText();
+  document.getElementById('resultCharCounter').textContent = `${plain.length.toLocaleString()}자`;
+}
+
+function analyzeText() {
+  const source = document.getElementById('sourceText').value;
+  segments = [];
+  isManuallyEdited = false;
+  document.getElementById('manualEditBadge').classList.add('hidden');
+
+  if (!source.trim() || !MASTER_REGEX) {
+    renderOutput();
+    renderSummaryTable();
+    document.getElementById('styleAdviceSection').classList.add('hidden');
+    document.getElementById('keywordBar').innerHTML =
+      '<span class="text-xs font-bold text-[#1E3A5F] mr-1">핵심 키워드 TOP 5:</span><span class="text-xs text-slate-400">검사 실행 시 자동 추출됩니다.</span>';
+    return;
+  }
+
+  const protectedRanges = getProtectedRanges(source);
+  let lastIndex = 0;
+  let matchIdx = 0;
+  MASTER_REGEX.lastIndex = 0;
+  let match;
+
+  while ((match = MASTER_REGEX.exec(source)) !== null) {
+    const matchedWord = match[0];
+    const entry = TERM_MAP.get(matchedWord);
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', text: source.slice(lastIndex, match.index) });
+    }
+
+    if (entry) {
+      const protectReason = checkProtectionReason(match.index, match.index + matchedWord.length, protectedRanges);
+      const ctxBefore = source.slice(Math.max(0, match.index - 12), match.index);
+      const ctxAfter = source.slice(match.index + matchedWord.length, match.index + matchedWord.length + 14);
+      segments.push({
+        type: 'match',
+        id: matchIdx++,
+        orig: matchedWord,
+        candidates: entry.candidates,
+        selected: entry.candidates[0],
+        enabled: !protectReason,
+        protectedReason: protectReason,
+        contextBefore: ctxBefore,
+        contextAfter: ctxAfter
+      });
+    } else {
+      segments.push({ type: 'text', text: matchedWord });
+    }
+    lastIndex = match.index + matchedWord.length;
+  }
+
+  if (lastIndex < source.length) {
+    segments.push({ type: 'text', text: source.slice(lastIndex) });
+  }
+
+  renderOutput();
+  renderSummaryTable();
+  extractKeywords(source);
+  analyzePublicStyle(source);
+}
+
+function buildResolvedTokens() {
+  const resolved = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg.type === 'text') {
+      resolved.push({ ...seg });
+    } else {
+      const activeWord = seg.enabled ? seg.selected : seg.orig;
+      let adjustedParticle = '';
+      if (i + 1 < segments.length && segments[i + 1].type === 'text') {
+        const nextText = segments[i + 1].text;
+        const adj = adjustFollowingParticle(activeWord, nextText);
+        if (adj.particle) {
+          adjustedParticle = adj.particle;
+          resolved.push({ ...seg, activeWord, adjustedParticle });
+          resolved.push({ type: 'text', text: adj.rest });
+          i++;
+          continue;
+        }
+      }
+      resolved.push({ ...seg, activeWord, adjustedParticle: '' });
+    }
+  }
+  return resolved;
+}
+
+function renderOutput() {
+  const display = document.getElementById('resultDisplay');
+  const showOrig = document.getElementById('showOrigToggle').checked;
+
+  if (segments.length === 0) {
+    display.innerHTML = '<span class="text-slate-400 text-sm" contenteditable="false">좌측에 문장을 입력하고 [행정용어 순화 검사하기]를 누르면 순화된 문장이 표시됩니다.</span>';
+    document.getElementById('matchCountBadge').textContent = '검출 0건 · 순화 0건';
+    updateResultCharCount();
+    return;
+  }
+
+  isManuallyEdited = false;
+  document.getElementById('manualEditBadge').classList.add('hidden');
+
+  const resolved = buildResolvedTokens();
+  let totalMatches = 0;
+  let enabledMatches = 0;
+
+  const html = resolved.map(item => {
+    if (item.type === 'text') return escapeHtml(item.text);
+    totalMatches++;
+    if (item.enabled) enabledMatches++;
+
+    let cls = item.enabled ? 'token-purified' : (item.protectedReason ? 'token-protected' : 'token-kept');
+    const hint = (item.enabled && showOrig)
+      ? `<span class="orig-hint" contenteditable="false">(←${escapeHtml(item.orig)})</span>`
+      : '';
+    const title = item.enabled
+      ? `원문: ${item.orig} (클릭하면 원문 유지)`
+      : (item.protectedReason ? `${item.protectedReason}으로 원문 유지됨 (클릭 시 강제 순화)` : `원문 유지됨 (클릭 시 '${item.selected}' 적용)`);
+
+    return `<span class="${cls}" data-id="${item.id}" title="${escapeHtml(title)}" onclick="toggleSingleMatch(${item.id})">${escapeHtml(item.activeWord)}${hint}</span>${escapeHtml(item.adjustedParticle)}`;
+  }).join('');
+
+  display.innerHTML = html;
+  document.getElementById('matchCountBadge').textContent = `검출 ${totalMatches}건 · 순화 ${enabledMatches}건`;
+  updateResultCharCount();
+}
+
+function toggleSingleMatch(id) {
+  const target = segments.find(s => s.type === 'match' && s.id === id);
+  if (!target) return;
+  target.enabled = !target.enabled;
+  renderOutput();
+  renderSummaryTable();
+}
+
+function toggleAllMatches(state) {
+  segments.forEach(s => {
+    if (s.type === 'match') {
+      s.enabled = state ? !s.protectedReason : false;
+    }
+  });
+  renderOutput();
+  renderSummaryTable();
+}
+
+function updateMatchSelection(id, newValue) {
+  const target = segments.find(s => s.type === 'match' && s.id === id);
+  if (!target) return;
+  target.selected = newValue;
+  target.enabled = true;
+  renderOutput();
+  renderSummaryTable();
+}
+
+function renderSummaryTable() {
+  const tbody = document.getElementById('summaryTableBody');
+  const matches = segments.filter(s => s.type === 'match');
+
+  if (matches.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-slate-400 py-8">검출된 순화 대상 용어가 없습니다.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = matches.map(m => {
+    const activeWord = m.enabled ? m.selected : m.orig;
+    const adj = adjustFollowingParticle(activeWord, m.contextAfter);
+    const previewAfter = adj.particle ? (adj.particle + adj.rest) : m.contextAfter;
+    const badgeColor = m.enabled ? 'bg-amber-200 text-blue-900' : (m.protectedReason ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-700');
+    const previewHtml = `...${escapeHtml(m.contextBefore)}<strong class="${badgeColor} px-1.5 py-0.5 rounded">${escapeHtml(activeWord)}</strong>${escapeHtml(previewAfter)}...`;
+
+    const optionsHtml = m.candidates.map(cand =>
+      `<option value="${escapeHtml(cand)}" ${cand === m.selected ? 'selected' : ''}>${escapeHtml(cand)}</option>`
+    ).join('');
+
+    const statusText = m.enabled ? '적용' : (m.protectedReason ? '보호됨' : '유지');
+
+    return `
+      <tr class="${m.enabled ? 'bg-white' : 'bg-slate-50/80 text-slate-500'}">
+        <td class="py-2.5 px-3">
+          <label class="inline-flex items-center gap-1.5 cursor-pointer font-semibold">
+            <input type="checkbox" ${m.enabled ? 'checked' : ''} onchange="toggleSingleMatch(${m.id})" class="rounded text-blue-600">
+            <span>${statusText}</span>
+          </label>
+          ${m.protectedReason ? `<div class="text-[11px] text-blue-600 mt-0.5">${escapeHtml(m.protectedReason)}</div>` : ''}
+        </td>
+        <td class="py-2.5 px-3 font-bold text-slate-800">${escapeHtml(m.orig)}</td>
+        <td class="py-2.5 px-3">
+          <select class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs sm:text-sm font-semibold text-[#1E3A5F] bg-white" onchange="updateMatchSelection(${m.id}, this.value)">
+            ${optionsHtml}
+          </select>
+        </td>
+        <td class="py-2.5 px-3">
+          <input type="text" class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs sm:text-sm" value="${escapeHtml(m.selected)}" placeholder="직접 입력" onchange="updateMatchSelection(${m.id}, this.value)">
+        </td>
+        <td class="py-2.5 px-3 text-xs sm:text-sm">${previewHtml}</td>
+        <td class="py-2.5 px-3 text-center no-print">
+          <button onclick="addIgnoreWord('${escapeHtml(m.orig)}')" class="text-xs bg-slate-100 hover:bg-red-50 hover:text-red-700 border border-slate-300 px-2 py-1 rounded transition" title="이 단어를 사전에선 제외하여 앞으로 검출하지 않습니다">
+            예외 등록
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function onManualEdit() {
+  isManuallyEdited = true;
+  document.getElementById('manualEditBadge').classList.remove('hidden');
+  updateResultCharCount();
+}
+
+// ==========================================
+// 6. 공공언어 문체·일본어투·장문 진단 엔진
+// ==========================================
+function analyzePublicStyle(text) {
+  const section = document.getElementById('styleAdviceSection');
+  if (!document.getElementById('checkStyleIssues').checked) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  const styleRules = [
+    { regex: /에\s*있어서|에\s*있어/g, label: '일본어투 번역 표현', desc: "'~에 있어서'는 일본어 '~において'의 번역투입니다. '~에서', '~할 때' 또는 생략하는 것이 자연스럽습니다." },
+    { regex: /의\s*경우(?:에는|는|에)?/g, label: '불필요한 의존명사 남용', desc: "'~의 경우'를 남발하면 문장이 길어집니다. 은/는 또는 '~할 때'로 간결하게 고쳐 보세요." },
+    { regex: /(?:되어지|보여지|쓰여지|만들어지|불려지)[다며고는은]/g, label: '이중 피동 표현', desc: "'~되어지다', '~보여지다'는 잘못된 이중 피동입니다. '~되다', '~보이다'로 바로잡아 주세요." },
+    { regex: /바와\s*같이/g, label: '번역투 관용구', desc: "'~한 바와 같이' 대신 '~한 것처럼', '~한 대로'를 권장합니다." },
+    { regex: /기\s*바랍니다/g, label: '권위적 지시형 어미', desc: "대민 공고문에서는 '~기 바랍니다'보다 '~해 주시기 바랍니다' 또는 '~하시기 바랍니다'가 부드럽습니다." },
+    { regex: /총\s*\d+[개명건원]에\s*달하는/g, label: '과장·번역투 수식', desc: "'~에 달하는' 대신 '모두 ~인', '총 ~규모의'로 간결히 표현할 수 있습니다." }
+  ];
+
+  const foundIssues = [];
+  styleRules.forEach(rule => {
+    let m;
+    while ((m = rule.regex.exec(text)) !== null) {
+      const snippet = text.slice(Math.max(0, m.index - 15), Math.min(text.length, m.index + m[0].length + 15)).replace(/\n/g, ' ');
+      foundIssues.push({
+        type: rule.label,
+        matched: m[0],
+        snippet,
+        advice: rule.desc
+      });
+    }
+  });
+
+  // 110자 이상 과도한 장문 체크
+  const sentences = text.split(/[.!?]\s+|\n+/).map(s => s.trim()).filter(Boolean);
+  sentences.forEach(sent => {
+    if (sent.length >= 110) {
+      foundIssues.push({
+        type: `지나치게 긴 문장 (${sent.length}자)`,
+        matched: sent.slice(0, 28) + '...',
+        snippet: sent.slice(0, 65) + '...',
+        advice: '한 문장이 110자를 넘으면 시민이 이해하기 어렵습니다. 두 문장으로 나누어 작성하는 것을 권장합니다.'
+      });
+    }
+  });
+
+  if (foundIssues.length === 0) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+  document.getElementById('styleIssueBadge').textContent = `${foundIssues.length}건 감지`;
+  document.getElementById('styleAdviceList').innerHTML = foundIssues.map(item => `
+    <div class="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      <div>
+        <span class="inline-block bg-indigo-100 text-indigo-800 text-xs font-bold px-2 py-0.5 rounded mr-1.5">${escapeHtml(item.type)}</span>
+        <span class="font-semibold text-slate-800">"${escapeHtml(item.matched)}"</span>
+        <p class="text-xs text-slate-600 mt-1">${escapeHtml(item.advice)}</p>
+      </div>
+      <div class="text-xs bg-slate-50 border border-slate-200 px-3 py-1.5 rounded text-slate-500 max-w-md truncate">
+        문맥: ...${escapeHtml(item.snippet)}...
+      </div>
+    </div>
+  `).join('');
+}
+
+// ==========================================
+// 7. 파일 입출력 (HWPX / DOCX / TXT / XLSX)
+// ==========================================
+async function handleDocUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  document.getElementById('loadedFileName').textContent = `불러온 파일: ${file.name}`;
+
+  try {
+    let extractedText = '';
+    if (ext === 'txt') {
+      extractedText = await file.text();
+    } else if (ext === 'hwpx') {
+      const zip = await JSZip.loadAsync(file);
+      const sectionFiles = Object.keys(zip.files).filter(name => name.startsWith('Contents/section') && name.endsWith('.xml')).sort();
+      if (sectionFiles.length === 0) throw new Error('HWPX 본문 XML을 찾을 수 없습니다.');
+      const parser = new DOMParser();
+      for (const sf of sectionFiles) {
+        const xmlStr = await zip.files[sf].async('string');
+        const doc = parser.parseFromString(xmlStr, 'application/xml');
+        const paragraphs = doc.getElementsByTagNameNS('*', 'p');
+        for (const p of paragraphs) {
+          const texts = p.getElementsByTagNameNS('*', 't');
+          let line = '';
+          for (const t of texts) line += t.textContent;
+          if (line.trim()) extractedText += line + '\n';
+        }
+      }
+    } else if (ext === 'docx') {
+      const zip = await JSZip.loadAsync(file);
+      const docXml = zip.files['word/document.xml'];
+      if (!docXml) throw new Error('DOCX 본문 XML을 찾을 수 없습니다.');
+      const xmlStr = await docXml.async('string');
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlStr, 'application/xml');
+      const paragraphs = doc.getElementsByTagNameNS('*', 'p');
+      for (const p of paragraphs) {
+        const texts = p.getElementsByTagNameNS('*', 't');
+        let line = '';
+        for (const t of texts) line += t.textContent;
+        if (line.trim()) extractedText += line + '\n';
+      }
+    } else {
+      showToast('지원하지 않는 파일 형식입니다. (.hwpx, .docx, .txt 지원)');
+      return;
+    }
+
+    document.getElementById('sourceText').value = extractedText.trim();
+    updateCharCount();
+    analyzeText();
+    showToast(`'${file.name}' 문서 본문을 불러와 검사를 완료했습니다.`);
+  } catch (err) {
+    console.error(err);
+    showToast('문서 읽기 중 오류가 발생했습니다. 암호화된 문서인지 확인해 주세요.');
+  }
+  event.target.value = '';
+}
+
+function handleDictUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      const parsed = [];
+      rows.forEach((row, idx) => {
+        if (!row || row.length < 2) return;
+        let term = '';
+        let pur = '';
+        if (row.length >= 3 && (typeof row[0] === 'number' || /^\d+$/.test(String(row[0]).trim()))) {
+          term = String(row[1] || '').trim();
+          pur = String(row[2] || '').trim();
+        } else {
+          term = String(row[0] || '').trim();
+          pur = String(row[1] || '').trim();
+        }
+        if (idx === 0 && (term.includes('대상') || term.includes('행정용어') || pur.includes('순화'))) return;
+        if (term && pur) {
+          parsed.push({ t: term, p: pur });
+        }
+      });
+
+      if (parsed.length === 0) {
+        showToast('엑셀에서 유효한 용어 목록을 찾지 못했습니다.');
+        return;
+      }
+
+      rebuildDictionaryEngine(parsed);
+      analyzeText();
+      showToast(`엑셀 사전(${parsed.length}건)이 성공적으로 적용되었습니다.`);
+    } catch (err) {
+      console.error(err);
+      showToast('엑셀 파일을 읽는 중 오류가 발생했습니다.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = '';
+}
+
+function exportComparisonExcel() {
+  const matches = segments.filter(s => s.type === 'match');
+  if (matches.length === 0) {
+    showToast('내보낼 검출 내역이 없습니다. 먼저 순화 검사를 실행해 주세요.');
+    return;
+  }
+
+  const rows = [
+    ['연번', '적용상태', '원문 용어', '선택 순화어', '후보 목록', '문맥(앞)', '문맥(뒤)']
+  ];
+  matches.forEach((m, idx) => {
+    rows.push([
+      idx + 1,
+      m.enabled ? '순화 적용' : (m.protectedReason || '원문 유지'),
+      m.orig,
+      m.enabled ? m.selected : m.orig,
+      m.candidates.join(', '),
+      m.contextBefore.replace(/\n/g, ' '),
+      m.contextAfter.replace(/\n/g, ' ')
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '행정용어_순화_비교표');
+  XLSX.writeFile(wb, `행정용어_순화_검토결과_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('검토 비교표 엑셀 파일이 저장되었습니다.');
+}
+
+function exportDictionaryExcel() {
+  const rows = [['번호', '대상 용어', '순화어', '구분']];
+  activeDictionary.forEach((d, idx) => {
+    rows.push([idx + 1, d.t, d.p, d.source || '기본 사전']);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '순화어_목록');
+  XLSX.writeFile(wb, '행정용어_순화어_목록_내보내기.xlsx');
+}
+
+function downloadTxtResult() {
+  const text = getCleanPlainText();
+  if (!text.trim()) {
+    showToast('저장할 순화 결과 문장이 없습니다.');
+    return;
+  }
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `순화완료_문서_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  showToast('순화 결과 텍스트 파일(.txt)이 저장되었습니다.');
+}
+
+// ==========================================
+// 8. 클립보드 복사 & 키워드 추출 & 사용자 사전 관리
+// ==========================================
+function getCleanPlainText() {
+  const display = document.getElementById('resultDisplay');
+  if (display.querySelector('.text-slate-400')) return '';
+  const clone = display.cloneNode(true);
+  clone.querySelectorAll('.orig-hint').forEach(el => el.remove());
+  return clone.innerText;
+}
+
+function copyCleanText() {
+  const text = getCleanPlainText();
+  if (!text.trim()) {
+    showToast('복사할 순화 결과 문장이 없습니다.');
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand('copy');
+    showToast('원문 병기 표시를 제외한 순화 결과가 복사되었습니다.');
+  } catch (e) {
+    showToast('복사에 실패했습니다. 결과창을 직접 선택해 복사해 주세요.');
+  }
+  document.body.removeChild(textarea);
+}
+
+function extractKeywords(text) {
+  const stopwords = new Set([
+    '있다', '없다', '하다', '되다', '이다', '위해', '통해', '따라', '대한', '관한',
+    '및', '등', '수', '것', '중', '내', '외', '각', '제', '본', '해당', '경우',
+    '이번', '다음', '오늘', '내일', '아래', '위', '모든', '위한', '있는', '없는', '하는'
+  ]);
+  const tokens = text.match(/[가-힣]{2,}/g) || [];
+  const freq = new Map();
+
+  tokens.forEach(tok => {
+    let stem = tok.replace(/(입니다|습니다|합니다|됩니다|에서는|으로는|에게는|에서의|으로서|으로써|은|는|이|가|을|를|의|에|와|과|로|으로|도|만|부터|까지)$/, '');
+    if (stem.length >= 2 && !stopwords.has(stem)) {
+      freq.set(stem, (freq.get(stem) || 0) + 1);
+    }
+  });
+
+  const top5 = Array.from(freq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const bar = document.getElementById('keywordBar');
+  if (top5.length === 0) {
+    bar.innerHTML = '<span class="text-xs font-bold text-[#1E3A5F] mr-1">핵심 키워드 TOP 5:</span><span class="text-xs text-slate-400">추출된 키워드가 없습니다.</span>';
+    return;
+  }
+  bar.innerHTML = '<span class="text-xs font-bold text-[#1E3A5F] mr-1">핵심 키워드 TOP 5:</span>' +
+    top5.map(([word, cnt]) => `<span class="bg-[#EAF0F6] text-[#1E3A5F] border border-blue-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">#${escapeHtml(word)} (${cnt})</span>`).join('');
+}
+
+function openDictModal() {
+  renderDictTable();
+  renderCustomDictList();
+  renderIgnoreWordsList();
+  document.getElementById('dictModal').classList.remove('hidden');
+}
+
+function closeDictModal() {
+  document.getElementById('dictModal').classList.add('hidden');
+}
+
+function switchModalTab(tab) {
+  ['dict', 'custom', 'ignore'].forEach(t => {
+    const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
+    const pane = document.getElementById('modalTab' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (t === tab) {
+      btn.className = 'px-4 py-2 rounded-t-lg bg-white border-t border-x border-slate-200 text-[#1E3A5F]';
+      pane.classList.remove('hidden');
+    } else {
+      btn.className = 'px-4 py-2 rounded-t-lg text-slate-600 hover:text-slate-900';
+      pane.classList.add('hidden');
+    }
+  });
+}
+
+function renderDictTable() {
+  const q = document.getElementById('modalSearchInput').value.trim().toLowerCase();
+  const tbody = document.getElementById('dictTableBody');
+  const mapped = activeDictionary.map((d, i) => ({ ...d, no: i + 1 }));
+  const filtered = q
+    ? mapped.filter(d => String(d.t).toLowerCase().includes(q) || String(d.p).toLowerCase().includes(q))
+    : mapped;
+
+  tbody.innerHTML = filtered.slice(0, 200).map(d => `
+    <tr>
+      <td class="py-2 px-3">${d.no}</td>
+      <td class="py-2 px-3 font-bold">${escapeHtml(d.t)}</td>
+      <td class="py-2 px-3">${escapeHtml(d.p)}</td>
+      <td class="py-2 px-3 text-xs text-slate-500">${escapeHtml(d.source || '기본 사전')}</td>
+    </tr>
+  `).join('') + (filtered.length > 200 ? `<tr><td colspan="4" class="text-center text-slate-500 py-3">상위 200건만 표시됩니다. 검색어를 입력해 주세요. (총 ${filtered.length}건)</td></tr>` : '');
+}
+
+function addCustomDictEntry() {
+  const t = document.getElementById('newCustomTerm').value.trim();
+  const p = document.getElementById('newCustomPurified').value.trim();
+  if (!t || !p) {
+    showToast('대상 용어와 순화어를 모두 입력해 주세요.');
+    return;
+  }
+  customDictionary.unshift({ t, p });
+  localStorage.setItem('seocho_custom_dict', JSON.stringify(customDictionary));
+  document.getElementById('newCustomTerm').value = '';
+  document.getElementById('newCustomPurified').value = '';
+  rebuildDictionaryEngine();
+  renderCustomDictList();
+  renderDictTable();
+  analyzeText();
+  showToast(`'${t} → ${p}' 항목이 사용자 사전에 추가되었습니다.`);
+}
+
+function removeCustomDictEntry(idx) {
+  customDictionary.splice(idx, 1);
+  localStorage.setItem('seocho_custom_dict', JSON.stringify(customDictionary));
+  rebuildDictionaryEngine();
+  renderCustomDictList();
+  renderDictTable();
+  analyzeText();
+}
+
+function renderCustomDictList() {
+  const box = document.getElementById('customDictList');
+  if (customDictionary.length === 0) {
+    box.innerHTML = '<div class="p-4 text-center text-xs text-slate-400">등록된 사용자 순화어가 없습니다.</div>';
+    return;
+  }
+  box.innerHTML = customDictionary.map((item, idx) => `
+    <div class="px-4 py-2.5 flex justify-between items-center text-sm">
+      <div><strong>${escapeHtml(item.t)}</strong> <span class="text-slate-400 mx-1">→</span> <span class="text-blue-700 font-semibold">${escapeHtml(item.p)}</span></div>
+      <button onclick="removeCustomDictEntry(${idx})" class="text-xs text-red-600 hover:underline">삭제</button>
+    </div>
+  `).join('');
+}
+
+function addIgnoreWord(word) {
+  const clean = word.trim();
+  if (!clean) return;
+  if (!ignoreWords.includes(clean)) {
+    ignoreWords.push(clean);
+    localStorage.setItem('seocho_ignore_words', JSON.stringify(ignoreWords));
+    rebuildDictionaryEngine();
+    renderIgnoreWordsList();
+    analyzeText();
+    showToast(`'${clean}' 용어를 순화 예외(제외) 목록에 등록했습니다.`);
+  }
+}
+
+function addIgnoreWordFromInput() {
+  const inp = document.getElementById('newIgnoreTerm');
+  addIgnoreWord(inp.value);
+  inp.value = '';
+}
+
+function removeIgnoreWord(word) {
+  ignoreWords = ignoreWords.filter(w => w !== word);
+  localStorage.setItem('seocho_ignore_words', JSON.stringify(ignoreWords));
+  rebuildDictionaryEngine();
+  renderIgnoreWordsList();
+  analyzeText();
+}
+
+function renderIgnoreWordsList() {
+  const box = document.getElementById('ignoreWordsList');
+  if (ignoreWords.length === 0) {
+    box.innerHTML = '<span class="text-xs text-slate-400">등록된 예외 용어가 없습니다.</span>';
+    return;
+  }
+  box.innerHTML = ignoreWords.map(w => `
+    <span class="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-300 px-3 py-1 rounded-full text-xs font-semibold">
+      ${escapeHtml(w)}
+      <button onclick="removeIgnoreWord('${escapeHtml(w)}')" class="text-slate-500 hover:text-red-600 font-bold">✕</button>
+    </span>
+  `).join('');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('opacity-0');
+  t.classList.add('opacity-100');
+  setTimeout(() => {
+    t.classList.remove('opacity-100');
+    t.classList.add('opacity-0');
+  }, 2500);
+}
+
+function loadSample() {
+  const sample = `서초구는 금번 「노인복지법」 및 관내 독거노인 돌봄 인프라 확충에 있어 유관 기관과 합동 워크숍을 개최합니다.
+금일 배포되는 안내 리플릿을 참고하시어 참가를 희망하는 구민께서는 명일까지 첨부 서류를 구비하여 신청하시기 바랍니다.
+상기와 같이 접수된 신청서는 익일 심사를 거쳐 선정 결과를 개별 통보하며, 선정된 기관의 경우에는 소요 예산을 지원할 예정입니다.
+자세한 사항은 하기 문의처로 연락해 주시고, 지원금 불입 계좌 확인을 위해 지속적인 모니터링이 이루어져야 합니다.`;
+  document.getElementById('sourceText').value = sample;
+  document.getElementById('loadedFileName').textContent = '샘플 보도자료 불러옴';
+  updateCharCount();
+  analyzeText();
+}
+
+function clearAll() {
+  document.getElementById('sourceText').value = '';
+  document.getElementById('loadedFileName').textContent = '';
+  segments = [];
+  updateCharCount();
+  analyzeText();
+}
+
+// 초기화 실행
+window.onload = function() {
+  rebuildDictionaryEngine();
+};
+</script>
+</body>
+</html>
